@@ -40,7 +40,7 @@ var MAIL_QUERY_EF = 'subject:"e-Faturanız var" is:unread';
 var EDM_BASE      = "https://view.edmbilisim.com.tr";
 var PDF_FOLDER    = "FATURALAR";
 
-var FATURA_FILTRE = ["CNY"];
+var FATURA_FILTRE = []; // boş = tüm tedarikçilerin e-faturaları kabul edilir (önceden sadece "CNY" ön ekli Canyap faturaları)
 var NAKLIYE_KW    = ["NAKLİYE","NAKLIYE","PALET","TAŞIMA","TASIMA","SEVK","KARGO","TRANSPORT"];
 var NAKLIYE_KODLAR  = [
   "999997000101","331857000011","331857000012",
