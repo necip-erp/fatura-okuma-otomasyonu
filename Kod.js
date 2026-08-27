@@ -1697,6 +1697,4 @@ function miktarlariGeriDoldur() {
   Logger.log(durduruldu ? "⏱ BU ÇALIŞTIRMA SÜRE LİMİTİNDEN DURDU (devam etmek için tekrar çalıştırın)" : "✅ TÜM FATURALAR TAMAMLANDI");
   Logger.log("Bu çalıştırmada: " + basarili + " başarılı, " + hatali + " hatalı, " + atlanan + " atlandı");
   Logger.log("Güncellenen satır sayısı: " + guncellenenSatir);
-}// tetikleme: 1787813856
-// debug-trigger-2
-// secret eklendi, tetikleme 3
+}
