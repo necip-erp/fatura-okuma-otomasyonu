@@ -365,6 +365,15 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
     return parseFloat(t) || 0;
   }
 
+  // Bir hücrenin (birim adı/ürün adı gibi metin değil) rakamsal bir değer olup
+  // olmadığını anlamak için kullanılıyor — "TL" ve "%" gibi ekleri yok sayar.
+  function hucreSayiMi(str) {
+    if (!str) return false;
+    var t = str.trim().replace(/\bTL\b/gi, "").replace(/%/g, "").trim();
+    if (!/\d/.test(t)) return false;
+    return !/[a-zA-ZÇĞİÖŞÜçğıöşü]/.test(t);
+  }
+
   var trPat = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   var trM;
   var satirSayisi = 0;
@@ -388,6 +397,9 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
 
     var stokKoduIdx = -1;
     var stokKodu = "", stokAdi = "";
+    var birlesikStil = false;
+
+    // 1) Canyap stili (değiştirilmedi): kod tek başına bir hücrede (8-15 haneli sadece rakam)
     for (var i = 0; i < tdler.length; i++) {
       if (/^\d{8,15}$/.test(tdler[i].trim())) {
         stokKodu = tdler[i].trim();
@@ -395,28 +407,70 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
         break;
       }
     }
-    if (!stokKodu) continue;
-    if (stokKoduIdx + 1 < tdler.length) stokAdi = tdler[stokKoduIdx + 1];
 
-    var miktar     = sayiyaCevir(tdler[stokKoduIdx + 2] || "");
-    var birimFiyat = sayiyaCevir(tdler[stokKoduIdx + 3] || "");
-    var iskonto    = sayiyaCevir(tdler[stokKoduIdx + 4] || "");
-    var netFiyat, kdv;
-
-    if (iskonto > 100) {
-      Logger.log("Kolon kayması: " + tdler.join(" | "));
-      birimFiyat = iskonto;
-      iskonto    = sayiyaCevir(tdler[stokKoduIdx + 5] || "");
-      netFiyat   = sayiyaCevir(tdler[stokKoduIdx + 6] || "");
-      kdv        = sayiyaCevir(tdler[stokKoduIdx + 7] || "");
-    } else {
-      netFiyat   = sayiyaCevir(tdler[stokKoduIdx + 5] || "");
-      kdv        = sayiyaCevir(tdler[stokKoduIdx + 6] || "");
+    // 2) ★ YENİ: kod ve ürün adı aynı hücrede birleşik gelen şablon
+    //    (örn. "310200500022 - KALE VERSUS İNCE GÖM REZ HELA TAŞI 79099")
+    //    — Canyap dışı bazı tedarikçilerde (EDM Bilişim üzerinden farklı firma) görüldü.
+    if (!stokKodu) {
+      for (var j = 0; j < tdler.length; j++) {
+        var bm = tdler[j].trim().match(/^(\d{8,15})\s*[-–]\s*(.+)$/);
+        if (bm) {
+          stokKodu = bm[1];
+          stokAdi = bm[2].trim();
+          stokKoduIdx = j;
+          birlesikStil = true;
+          break;
+        }
+      }
     }
 
-    if (netFiyat === 0 && birimFiyat > 0) {
-      netFiyat = birimFiyat * (1 - iskonto / 100);
-      netFiyat = Math.round(netFiyat * 10000) / 10000;
+    if (!stokKodu) continue;
+
+    var miktar, birimFiyat, iskonto, netFiyat, kdv;
+
+    if (birlesikStil) {
+      // Kod hücresinden sonraki hücrelerden sayısal olanları sırayla topla
+      // (aradaki "Adet" gibi birim hücresi otomatik atlanır).
+      var sayilar = [];
+      for (var k = stokKoduIdx + 1; k < tdler.length; k++) {
+        if (hucreSayiMi(tdler[k])) sayilar.push(sayiyaCevir(tdler[k]));
+      }
+      if (sayilar.length >= 6) {
+        // Görülen sıra: MİKTAR, FİYAT, İSKONTO ORANI, İSKONTO TUTARI, KDV TUTARI, TUTAR
+        miktar = sayilar[0];
+        birimFiyat = sayilar[1];
+        iskonto = sayilar[2];
+        var kdvTutari   = sayilar[4];
+        var satirTutari = sayilar[5];
+        netFiyat = miktar > 0 ? Math.round((satirTutari / miktar) * 10000) / 10000 : birimFiyat * (1 - iskonto / 100);
+        // KDV_ORANI alanı önceden bazı şablonlarda yanlışlıkla tutar (₺) olarak
+        // kaydediliyordu; burada gerçek oran (%) hesaplanıyor.
+        kdv = satirTutari > 0 ? Math.round((kdvTutari / satirTutari) * 10000) / 100 : 0;
+      } else {
+        continue; // beklenmeyen kolon sayısı — yanlış veri yazmamak için satır atlanıyor
+      }
+    } else {
+      // Eski (Canyap) mantığı — hiç değiştirilmedi
+      stokAdi = stokKoduIdx + 1 < tdler.length ? tdler[stokKoduIdx + 1] : "";
+      miktar     = sayiyaCevir(tdler[stokKoduIdx + 2] || "");
+      birimFiyat = sayiyaCevir(tdler[stokKoduIdx + 3] || "");
+      iskonto    = sayiyaCevir(tdler[stokKoduIdx + 4] || "");
+
+      if (iskonto > 100) {
+        Logger.log("Kolon kayması: " + tdler.join(" | "));
+        birimFiyat = iskonto;
+        iskonto    = sayiyaCevir(tdler[stokKoduIdx + 5] || "");
+        netFiyat   = sayiyaCevir(tdler[stokKoduIdx + 6] || "");
+        kdv        = sayiyaCevir(tdler[stokKoduIdx + 7] || "");
+      } else {
+        netFiyat   = sayiyaCevir(tdler[stokKoduIdx + 5] || "");
+        kdv        = sayiyaCevir(tdler[stokKoduIdx + 6] || "");
+      }
+
+      if (netFiyat === 0 && birimFiyat > 0) {
+        netFiyat = birimFiyat * (1 - iskonto / 100);
+        netFiyat = Math.round(netFiyat * 10000) / 10000;
+      }
     }
 
     if (birimFiyat > 0 || netFiyat > 0) {
