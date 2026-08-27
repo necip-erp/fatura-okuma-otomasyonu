@@ -88,8 +88,14 @@ function efaturaOku() {
     thread.getMessages().forEach(function(msg) {
       if (!msg.isUnread()) return;
       try {
-        isleMail(msg, shFiy, shLog);
-        msg.markRead();
+        var sonuc = isleMail(msg, shFiy, shLog);
+        // ★ DÜZELTME: önceden isleMail içeride LINK_YOK/SAYFA_HATASI/PARSE_BASARISIZ
+        // gibi durumlarda hata fırlatmadan sessizce dönüyordu; bu satır her zaman
+        // çalıştığı için başarısız işlenen faturalar da "okundu" sayılıp bir daha
+        // hiç taranmıyordu. Artık sadece gerçekten sonuçlanan (başarılı, zaten
+        // işlenmiş, filtre dışı) mailler okundu işaretleniyor — teknik hatalarda
+        // mail okunmadı kalıp bir sonraki çalıştırmada otomatik tekrar denenecek.
+        if (sonuc && sonuc.markRead) msg.markRead();
       } catch(e) {
         Logger.log("HATA: " + e.message);
         logYaz(shLog, "?", msg.getFrom(), msg.getDate(), "HATA", e.message);
@@ -114,36 +120,36 @@ function isleMail(msg, shFiy, shLog) {
     var gecerli = FATURA_FILTRE.some(function(on) {
       return fatNo.toUpperCase().indexOf(on.toUpperCase()) === 0;
     });
-    if (!gecerli) { Logger.log("Filtre dışı: " + fatNo); return; }
+    if (!gecerli) { Logger.log("Filtre dışı: " + fatNo); return { markRead: true }; }
   }
 
   if (fatNo && faturaIslendiMi(shLog, fatNo)) {
     Logger.log("Zaten işlendi: " + fatNo);
-    return;
+    return { markRead: true };
   }
 
   var edmLink = linkBulMailden(body);
   if (!edmLink) {
     logYaz(shLog, fatNo, gond, tarih, "LINK_YOK", "Mail'de link bulunamadı");
-    return;
+    return { markRead: false };
   }
 
   var anaHTML = sayfaCek(edmLink);
   if (!anaHTML) {
     logYaz(shLog, fatNo, gond, tarih, "SAYFA_HATASI", "Ana sayfa açılamadı");
-    return;
+    return { markRead: false };
   }
 
   var htmlLink = htmlLinkBul(anaHTML);
   if (!htmlLink) {
     logYaz(shLog, fatNo, gond, tarih, "HTML_LINK_YOK", "Fatura HTML linki bulunamadı");
-    return;
+    return { markRead: false };
   }
 
   var faturaHTML = sayfaCek(htmlLink);
   if (!faturaHTML) {
     logYaz(shLog, fatNo, gond, tarih, "FATURA_HTML_HATASI", "Fatura HTML açılamadı");
-    return;
+    return { markRead: false };
   }
 
   var driveLink = "";
@@ -158,13 +164,14 @@ function isleMail(msg, shFiy, shLog) {
   var urunler = faturaParseEt(faturaHTML, fatNo, gond, tarih, driveLink, edmLink);
   if (!urunler || urunler.length === 0) {
     logYaz(shLog, fatNo, gond, tarih, "PARSE_BASARISIZ", "Ürün parse edilemedi");
-    return;
+    return { markRead: false };
   }
 
   urunler = nakliyeDagit(urunler);
   urunler.forEach(function(u) { fiyatYaz(shFiy, u); });
   logYaz(shLog, fatNo, gond, tarih, "BASARILI", urunler.length + " ürün");
   Logger.log("✅ " + fatNo + " → " + urunler.length + " ürün");
+  return { markRead: true };
 }
 
 function faturaHtmliPDFKaydet(html, fatNo, tarih) {
