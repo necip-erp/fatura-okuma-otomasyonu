@@ -1699,3 +1699,4 @@ function miktarlariGeriDoldur() {
   Logger.log("Güncellenen satır sayısı: " + guncellenenSatir);
 }// tetikleme: 1787813856
 // debug-trigger-2
+// secret eklendi, tetikleme 3
