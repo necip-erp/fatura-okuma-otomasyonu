@@ -69,6 +69,9 @@ const STOK_SHEETS = {
 // ═══════════════════════════════════════════════════════════════════
 
 function efaturaOku() {
+  var baslangic = Date.now();
+  var SURE_SINIRI_MS = 4.5 * 60 * 1000; // 6dk'lık sert Apps Script sınırına çarpmadan nazikçe dur
+
   var ss    = SpreadsheetApp.openById(SHEET_ID);
   var shFiy = getOrCreateSheet(ss, SHEET_FIYAT, [
     "STOK_KODU","STOK_ADI","MIKTAR","BIRIM_FIYAT","ISKONTO","NET_FIYAT",
@@ -84,9 +87,17 @@ function efaturaOku() {
   if (threads.length === 0) { Logger.log("Yeni e-fatura yok."); return; }
   Logger.log(threads.length + " e-fatura maili bulundu.");
 
+  var durduruldu = false;
   threads.forEach(function(thread) {
+    if (durduruldu) return;
     thread.getMessages().forEach(function(msg) {
+      if (durduruldu) return;
       if (!msg.isUnread()) return;
+      if (Date.now() - baslangic > SURE_SINIRI_MS) {
+        durduruldu = true;
+        Logger.log("⏱ Süre sınırına yaklaşıldı, kalan mailler bir sonraki çalıştırmaya bırakıldı.");
+        return;
+      }
       try {
         var sonuc = isleMail(msg, shFiy, shLog);
         // ★ DÜZELTME: önceden isleMail içeride LINK_YOK/SAYFA_HATASI/PARSE_BASARISIZ
