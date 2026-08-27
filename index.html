@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fincanlar Stok Takip</title>
+  <style>
+    :root {
+      --row-hover: #e8f0fe;
+      --highlight-bg: #fff3cd;
+      --primary: #1a73e8;
+      --border: #e0e0e0;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; background: #f5f6fa; color: #333; font-size: 13px; }
+    
+    .header { background: var(--primary); color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+    .header h1 { margin: 0; font-size: 20px; }
+    .header p { margin: 5px 0 0; opacity: 0.9; font-size: 12px; }
+    .header-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.4); color: white; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+    .header-btn:hover { background: rgba(255,255,255,0.3); }
+    
+    .stats-bar { display: flex; gap: 12px; padding: 15px 30px; background: white; border-bottom: 1px solid var(--border); overflow-x: auto; }
+    .stat-chip { background: #f8f9fa; padding: 10px 18px; border-radius: 20px; text-align: center; white-space: nowrap; min-width: 120px; }
+    .stat-chip strong { display: block; font-size: 18px; color: var(--primary); }
+    .stat-chip span { font-size: 11px; color: #666; }
+    
+    .filters-area { padding: 15px 30px; background: #fafafa; border-bottom: 1px solid var(--border); }
+    .search-row { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin-bottom: 12px; }
+    .search-row label { display: block; font-size: 12px; color: #555; margin-bottom: 4px; font-weight: 500; }
+    .search-row input { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; min-width: 300px; width: 100%; max-width: 500px; }
+    .search-row input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px rgba(26,115,232,0.1); }
+    .search-hint { font-size: 11px; color: #888; margin-top: 4px; }
+    
+    .tags-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .tags-label { font-size: 12px; color: #555; font-weight: 500; margin-right: 4px; }
+    .tag-btn { padding: 5px 12px; border: 1px solid #ddd; border-radius: 16px; cursor: pointer; font-size: 12px; background: white; color: #333; transition: all 0.15s; user-select: none; }
+    .tag-btn:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .tag-btn.active { border-color: currentColor; font-weight: 600; box-shadow: 0 0 0 2px rgba(0,0,0,0.05); }
+    .tag-btn .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+    
+    .table-wrapper { padding: 20px 30px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; background: white; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); min-width: 1400px; font-size: 12px; }
+    th, td { padding: 9px 8px; text-align: left; border-bottom: 1px solid #eee; white-space: nowrap; }
+    th { background: #f8f9fa; font-weight: 600; color: #444; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; position: sticky; top: 0; z-index: 10; }
+    th:hover { background: #e8eaed; }
+    tr:hover { background: var(--row-hover) !important; transition: background 0.1s; }
+    td { vertical-align: middle; }
+    .col-kod { min-width: 90px; }
+    .col-ad { min-width: 260px; white-space: normal; line-height: 1.4; }
+    .col-num { min-width: 60px; text-align: right; }
+    .col-fiyat { min-width: 75px; text-align: right; }
+    .col-fat { min-width: 120px; }
+    .col-tarih { min-width: 85px; }
+    .col-ted { min-width: 90px; }
+    .col-link { min-width: 60px; text-align: center; }
+    .col-tags { min-width: 120px; }
+    
+    .stok-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+    .stok-var .stok-dot { background: #34a853; }
+    .stok-yok .stok-dot { background: #ccc; }
+    .stok-var { font-weight: 500; }
+    .stok-yok { color: #999; font-style: italic; }
+    
+    .badge { padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 500; }
+    .badge-canyap { background: #e3f2fd; color: #1565c0; }
+    
+    .item-tags { display: inline-flex; gap: 3px; flex-wrap: wrap; vertical-align: middle; margin-left: 6px; }
+    .item-tag { font-size: 9px; padding: 1px 5px; border-radius: 8px; color: white; font-weight: 500; cursor: pointer; user-select: none; }
+    .item-tag:hover { opacity: 0.85; transform: scale(1.05); }
+    
+    .fatura-btn { background: var(--primary); color: white; padding: 3px 8px; border-radius: 3px; text-decoration: none; font-size: 11px; font-weight: 500; cursor: pointer; border: none; }
+    .fatura-btn:hover { background: #1557b0; }
+    .fatura-yok { color: #bbb; font-size: 11px; }
+    
+    .loading { text-align: center; padding: 60px; color: #666; font-size: 14px; }
+    
+    .modal-overlay { display: none; position: fixed; z-index: 1000; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); }
+    .modal-overlay.active { display: flex; align-items: center; justify-content: center; }
+    .modal-box { width: 95%; height: 95%; max-width: 1200px; background: white; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; }
+    .modal-header { padding: 12px 20px; background: var(--primary); color: white; display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { margin: 0; font-size: 14px; }
+    .modal-close { background: none; border: none; color: white; font-size: 24px; cursor: pointer; padding: 0 8px; line-height: 1; }
+    .modal-close:hover { background: rgba(255,255,255,0.2); border-radius: 4px; }
+    .modal-body { flex: 1; overflow: hidden; }
+    .modal-body iframe { width: 100%; height: 100%; border: none; }
+    
+    .settings-panel { display: none; background: white; padding: 20px 30px; border-bottom: 2px solid var(--border); }
+    .settings-panel.active { display: block; }
+    .settings-tabs { display: flex; gap: 4px; margin-bottom: 15px; border-bottom: 1px solid var(--border); }
+    .settings-tab { padding: 8px 16px; border: none; background: none; cursor: pointer; font-size: 13px; color: #666; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .settings-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+    .settings-content { display: none; }
+    .settings-content.active { display: block; }
+    .settings-title { font-size: 14px; font-weight: 600; margin-bottom: 15px; color: #444; }
+    .settings-row { display: flex; gap: 40px; flex-wrap: wrap; align-items: center; }
+    .settings-item label { display: block; font-size: 12px; color: #555; margin-bottom: 6px; font-weight: 500; }
+    .color-row { display: flex; align-items: center; gap: 10px; }
+    .color-row input[type="color"] { width: 42px; height: 32px; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; padding: 1px; background: white; }
+    .color-row code { font-size: 11px; color: #666; background: #f5f5f5; padding: 2px 6px; border-radius: 3px; }
+    
+    .col-toggle-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+    .col-toggle-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer; user-select: none; }
+    .col-toggle-item:hover { background: #e8eaed; }
+    .col-toggle-item input { cursor: pointer; }
+    .col-toggle-item label { font-size: 12px; color: #444; cursor: pointer; flex: 1; }
+    
+    .tag-manager { display: flex; flex-direction: column; gap: 10px; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+    .tag-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 16px; font-size: 12px; color: white; font-weight: 500; }
+    .tag-chip .del { cursor: pointer; opacity: 0.8; font-size: 14px; line-height: 1; }
+    .tag-chip .del:hover { opacity: 1; color: #ff4444; }
+    .tag-add-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .tag-add-row input { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+    .tag-add-row input[type="color"] { width: 40px; height: 32px; padding: 1px; }
+    .tag-add-row .btn { padding: 6px 14px; font-size: 13px; }
+    
+    @media (max-width: 1200px) {
+      .search-row input { max-width: 100%; }
+      .col-toggle-grid { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>🏭 Fincanlar Stok Takip Ekranı</h1>
+      <p>Stok durumu ve maliyet takibi</p>
+    </div>
+    <button class="header-btn" onclick="toggleSettings()">⚙️ Ayarlar</button>
+  </div>
+  
+  <div class="settings-panel" id="settingsPanel">
+    <div class="settings-tabs">
+      <button class="settings-tab active" onclick="switchTab('colors', this)">Renkler</button>
+      <button class="settings-tab" onclick="switchTab('columns', this)">Kolonlar</button>
+      <button class="settings-tab" onclick="switchTab('tags', this)">Etiketler</button>
+    </div>
+    
+    <div class="settings-content active" id="tab-colors">
+      <div class="settings-title">Görünüm Renkleri</div>
+      <div class="settings-row">
+        <div class="settings-item">
+          <label>Satır Üzerine Gelince Rengi</label>
+          <div class="color-row">
+            <input type="color" id="hoverColor" onchange="saveSettings()">
+            <code id="hoverColorVal">#e8f0fe</code>
+          </div>
+        </div>
+        <div class="settings-item">
+          <label>Arama Vurgu (Highlight) Rengi</label>
+          <div class="color-row">
+            <input type="color" id="highlightColor" onchange="saveSettings()">
+            <code id="highlightColorVal">#fff3cd</code>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="settings-content" id="tab-columns">
+      <div class="settings-title">Görünür Kolonlar</div>
+      <div class="col-toggle-grid" id="colToggleGrid"></div>
+    </div>
+    
+    <div class="settings-content" id="tab-tags">
+      <div class="settings-title">Etiket Yönetimi</div>
+      <div class="tag-manager">
+        <div class="tag-list" id="tagList"></div>
+        <div class="tag-add-row">
+          <input type="text" id="newTagName" placeholder="Yeni etiket adı" style="min-width:150px">
+          <input type="color" id="newTagColor" value="#d97706">
+          <button class="btn btn-primary" onclick="addTag()">➕ Ekle</button>
+          <button class="btn btn-success" onclick="saveTags()">💾 Kaydet</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="stats-bar" id="stats">
+    <div class="stat-chip"><strong id="s1">-</strong><span>Toplam Ürün</span></div>
+    <div class="stat-chip"><strong id="s2">-</strong><span>Toplam Depo</span></div>
+    <div class="stat-chip"><strong id="s3">-</strong><span>Toplam Satılabilir</span></div>
+    <div class="stat-chip"><strong id="s4">-</strong><span>Fiyatı Olan</span></div>
+    <div class="stat-chip"><strong id="s5">-</strong><span>Ort. Maliyet</span></div>
+    <div class="stat-chip"><strong id="s6">-</strong><span>Stok Tarihi</span></div>
+  </div>
+
+  <div class="filters-area">
+    <div class="search-row">
+      <div style="flex:1;max-width:500px">
+        <label>Stok Adı Ara</label>
+        <input type="text" id="fAd" placeholder="Örn: 60x120 porcelain beyaz..." oninput="sorgula()" autocomplete="off">
+        <div class="search-hint">Kelime kelime arar. Sıralama önemli değil. Örn: "beyaz 60x120"</div>
+      </div>
+      <button class="header-btn" style="background:#34a853;border:none;margin-bottom:3px" onclick="indirCSV()">📥 Excel</button>
+    </div>
+    <div class="tags-row" id="tagsArea" style="display:none">
+      <span class="tags-label">Etiketler:</span>
+    </div>
+  </div>
+
+  <div id="loading" class="loading">Veriler yükleniyor...</div>
+  
+  <div class="table-wrapper" id="tableContainer" style="display:none">
+    <table>
+      <thead id="tableHead">
+        <tr>
+          <th class="col-kod" data-key="kod" onclick="sort('kod')">Stok Kodu ↕</th>
+          <th class="col-ad" data-key="ad" onclick="sort('ad')">Stok Adı ↕</th>
+          <th class="col-tags" data-key="tags" style="cursor:default">Etiketler</th>
+          <th class="col-num" data-key="merkezDepo" onclick="sort('merkezDepo')">Depo ↕</th>
+          <th class="col-num" data-key="ayrilmis" onclick="sort('ayrilmis')">Ayr. ↕</th>
+          <th class="col-num" data-key="satilabilir" onclick="sort('satilabilir')">Satılab. ↕</th>
+          <th class="col-fiyat" data-key="birim" onclick="sort('birim')">Birim Fiyat ↕</th>
+          <th class="col-num" data-key="iskonto" onclick="sort('iskonto')">İsk% ↕</th>
+          <th class="col-fiyat" data-key="net" onclick="sort('net')">Net Fiyat ↕</th>
+          <th class="col-fiyat" data-key="nakliye" onclick="sort('nakliye')">Nakliye ↕</th>
+          <th class="col-fiyat" data-key="maliyet" onclick="sort('maliyet')">Maliyet ↕</th>
+          <th class="col-fat" data-key="faturaNo" onclick="sort('faturaNo')">Fatura No ↕</th>
+          <th class="col-tarih" data-key="faturaTarih" onclick="sort('faturaTarih')">Fatura Tarihi ↕</th>
+          <th class="col-ted" data-key="tedarikci" onclick="sort('tedarikci')">Tedarikçi ↕</th>
+          <th class="col-link" style="cursor:default">Fatura</th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="modal-overlay" id="faturaModal" onclick="closeModal(event)">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>📄 Fatura Görüntüleme</h3>
+        <button class="modal-close" onclick="closeModalDirect()">×</button>
+      </div>
+      <div class="modal-body">
+        <iframe id="faturaIframe" src=""></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let allData = [];
+    let filteredData = [];
+    let sortDir = {};
+    let activeTags = new Set();
+    let SETTINGS = {};
+    let allEtiketler = [];
+    let etiketColorMap = {};
+    let COL_DEFS = [
+      {key:'kod', label:'Stok Kodu', cls:'col-kod', show:true},
+      {key:'ad', label:'Stok Adı', cls:'col-ad', show:true},
+      {key:'tags', label:'Etiketler', cls:'col-tags', show:true},
+      {key:'merkezDepo', label:'Depo', cls:'col-num', show:true},
+      {key:'ayrilmis', label:'Ayr.', cls:'col-num', show:true},
+      {key:'satilabilir', label:'Satılab.', cls:'col-num', show:true},
+      {key:'birim', label:'Birim Fiyat', cls:'col-fiyat', show:true},
+      {key:'iskonto', label:'İsk%', cls:'col-num', show:true},
+      {key:'net', label:'Net Fiyat', cls:'col-fiyat', show:true},
+      {key:'nakliye', label:'Nakliye', cls:'col-fiyat', show:true},
+      {key:'maliyet', label:'Maliyet', cls:'col-fiyat', show:true},
+      {key:'faturaNo', label:'Fatura No', cls:'col-fat', show:true},
+      {key:'faturaTarih', label:'Fatura Tarihi', cls:'col-tarih', show:true},
+      {key:'tedarikci', label:'Tedarikçi', cls:'col-ted', show:true},
+      {key:'link', label:'Fatura', cls:'col-link', show:true}
+    ];
+    
+    function loadSettings() {
+      try { SETTINGS = JSON.parse(localStorage.getItem('canyapSettings') || '{}'); } catch(e){ SETTINGS={}; }
+      var hover = SETTINGS.hoverColor || '#e8f0fe';
+      var highlight = SETTINGS.highlightColor || '#fff3cd';
+      if (SETTINGS.columns) {
+        SETTINGS.columns.forEach(function(c){
+          var col = COL_DEFS.find(function(x){return x.key===c.key});
+          if (col) col.show = !!c.show;
+        });
+      }
+      document.documentElement.style.setProperty('--row-hover', hover);
+      document.documentElement.style.setProperty('--highlight-bg', highlight);
+      document.getElementById('hoverColor').value = hover;
+      document.getElementById('highlightColor').value = highlight;
+      document.getElementById('hoverColorVal').textContent = hover;
+      document.getElementById('highlightColorVal').textContent = highlight;
+      renderColToggles();
+    }
+    function saveSettings() {
+      SETTINGS.hoverColor = document.getElementById('hoverColor').value;
+      SETTINGS.highlightColor = document.getElementById('highlightColor').value;
+      document.getElementById('hoverColorVal').textContent = SETTINGS.hoverColor;
+      document.getElementById('highlightColorVal').textContent = SETTINGS.highlightColor;
+      document.documentElement.style.setProperty('--row-hover', SETTINGS.hoverColor);
+      document.documentElement.style.setProperty('--highlight-bg', SETTINGS.highlightColor);
+      SETTINGS.columns = COL_DEFS.map(function(c){return {key:c.key, show:c.show};});
+      localStorage.setItem('canyapSettings', JSON.stringify(SETTINGS));
+      applyColumnVisibility();
+      renderTable();
+    }
+    function toggleSettings() {
+      document.getElementById('settingsPanel').classList.toggle('active');
+    }
+    function switchTab(tab, btn) {
+      document.querySelectorAll('.settings-tab').forEach(function(b){ b.classList.remove('active'); });
+      document.querySelectorAll('.settings-content').forEach(function(c){ c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById('tab-'+tab).classList.add('active');
+    }
+    
+    function renderColToggles() {
+      var grid = document.getElementById('colToggleGrid');
+      grid.innerHTML = '';
+      COL_DEFS.forEach(function(col){
+        if (col.key === 'kod') return;
+        var div = document.createElement('div');
+        div.className = 'col-toggle-item';
+        div.innerHTML = '<input type="checkbox" id="col-'+col.key+'" '+(col.show?'checked':'')+' onchange="toggleColumn(\''+col.key+'\',this.checked)">'+
+          '<label for="col-'+col.key+'">'+col.label+'</label>';
+        grid.appendChild(div);
+      });
+    }
+    function toggleColumn(key, show) {
+      var col = COL_DEFS.find(function(c){return c.key===key});
+      if (col) col.show = show;
+      saveSettings();
+    }
+    function applyColumnVisibility() {
+      COL_DEFS.forEach(function(col){
+        var cells = document.querySelectorAll('.'+col.cls);
+        cells.forEach(function(c){
+          c.style.display = col.show ? '' : 'none';
+        });
+      });
+    }
+    
+    function renderTagList() {
+      var container = document.getElementById('tagList');
+      container.innerHTML = '';
+      allEtiketler.forEach(function(e){
+        var chip = document.createElement('span');
+        chip.className = 'tag-chip';
+        chip.style.background = e.c;
+        chip.innerHTML = escapeHtml(e.t) + ' <span class="del" onclick="removeTag(\''+escapeHtml(e.t)+'\')">×</span>';
+        container.appendChild(chip);
+      });
+    }
+    function addTag() {
+      var name = document.getElementById('newTagName').value.trim();
+      var color = document.getElementById('newTagColor').value;
+      if (!name) return alert('Etiket adı girin');
+      if (allEtiketler.find(function(e){return e.t===name})) return alert('Bu etiket zaten var');
+      allEtiketler.push({t:name, c:color});
+      etiketColorMap[name] = color;
+      renderTagList();
+      renderTags();
+      document.getElementById('newTagName').value = '';
+    }
+    function removeTag(name) {
+      allEtiketler = allEtiketler.filter(function(e){return e.t !== name});
+      delete etiketColorMap[name];
+      activeTags.delete(name);
+      renderTagList();
+      renderTags();
+      sorgula();
+    }
+    function saveTags() {
+      var payload = { action: 'saveEtiket', etiketler: allEtiketler };
+      google.script.run
+        .withSuccessHandler(function(res){
+          if (res.ok) alert('Etiketler kaydedildi');
+          else alert('Hata: ' + (res.error || 'Bilinmeyen'));
+        })
+        .withFailureHandler(function(err){ alert('Hata: ' + err.message); })
+        .handleRequest({postData:{contents:JSON.stringify(payload)}});
+    }
+    
+    function renderTags(etiketler) {
+      if (etiketler) { allEtiketler = etiketler; etiketler.forEach(function(e){ etiketColorMap[e.t]=e.c; }); }
+      var container = document.getElementById('tagsArea');
+      container.innerHTML = '<span class="tags-label">Etiketler:</span>';
+      if (!allEtiketler || allEtiketler.length === 0) { container.style.display = 'none'; return; }
+      container.style.display = 'flex';
+      allEtiketler.forEach(function(e){
+        var btn = document.createElement('button');
+        btn.className = 'tag-btn' + (activeTags.has(e.t) ? ' active' : '');
+        btn.style.borderColor = e.c;
+        btn.style.color = e.c;
+        if (activeTags.has(e.t)) btn.style.background = e.c + '20';
+        btn.innerHTML = '<span class="dot" style="background:' + e.c + '"></span>' + escapeHtml(e.t);
+        btn.onclick = function(){
+          if (activeTags.has(e.t)) {
+            activeTags.delete(e.t);
+            btn.classList.remove('active');
+            btn.style.background = 'white';
+          } else {
+            activeTags.add(e.t);
+            btn.classList.add('active');
+            btn.style.background = e.c + '20';
+          }
+          sorgula();
+        };
+        container.appendChild(btn);
+      });
+    }
+    
+    function loadData() {
+      console.log("Veri cekiliyor...");
+      loadSettings();
+      google.script.run
+        .withSuccessHandler(function(res){
+          console.log("Sunucudan yanit:", res);
+          if (res.error) {
+            document.getElementById('loading').innerHTML = '<b style="color:red">Sunucu Hatasi:</b> ' + res.error;
+            return;
+          }
+          allData = res.data || [];
+          if (res.etiketler) {
+            renderTags(res.etiketler);
+            renderTagList();
+          }
+          document.getElementById('loading').style.display = 'none';
+          document.getElementById('tableContainer').style.display = 'block';
+          applyColumnVisibility();
+          sorgula();
+          updateStats();
+        })
+        .withFailureHandler(function(err){
+          console.error("Baglanti hatasi:", err);
+          document.getElementById('loading').innerHTML = '<b style="color:red">Baglanti Hatasi:</b> ' + (err.message || "Bilinmeyen hata");
+        })
+        .getDashboardData();
+    }
+    
+    function matchesQuery(ad, query) {
+      if (!query) return true;
+      var words = query.toLowerCase().split(/\s+/).filter(function(w){ return w.length > 0; });
+      if (!words.length) return true;
+      var adLower = String(ad).toLowerCase();
+      return words.every(function(w){
+        if (adLower.includes(w)) return true;
+        if (w.length > 3 && adLower.includes(w.substring(0, w.length - 1))) return true;
+        return false;
+      });
+    }
+    
+    function sorgula() {
+      var fa = document.getElementById('fAd').value.trim();
+      filteredData = allData.filter(function(r){
+        if (!matchesQuery(r.ad, fa)) return false;
+        if (activeTags.size > 0) {
+          var itemTags = r.etiketler || [];
+          var hasAny = Array.from(activeTags).some(function(t){ return itemTags.indexOf(t) > -1; });
+          if (!hasAny) return false;
+        }
+        return true;
+      });
+      renderTable();
+      updateStats();
+    }
+    
+    function updateStats() {
+      var data = filteredData.length > 0 ? filteredData : allData;
+      document.getElementById('s1').innerText = data.length.toLocaleString('tr-TR');
+      document.getElementById('s2').innerText = data.reduce(function(s,r){return s+(r.merkezDepo||0)},0).toLocaleString('tr-TR');
+      document.getElementById('s3').innerText = data.reduce(function(s,r){return s+(r.satilabilir||0)},0).toLocaleString('tr-TR');
+      var fiyatli = data.filter(function(r){return r.maliyet > 0}).length;
+      document.getElementById('s4').innerText = fiyatli.toLocaleString('tr-TR');
+      var avg = fiyatli ? (data.reduce(function(s,r){return s+(r.maliyet||0)},0) / fiyatli).toFixed(2) : 0;
+      document.getElementById('s5').innerText = Number(avg).toLocaleString('tr-TR') + ' ₺';
+      var sonStok = data.map(function(r){return r.stokTarih})
+        .filter(function(s){ return s && !String(s).includes('pasif'); })
+        .sort().pop() || '-';
+      document.getElementById('s6').innerText = formatDate(sonStok);
+    }
+    
+    function formatDate(dateStr) {
+      if (!dateStr || dateStr === '-') return '-';
+      var s = String(dateStr).trim().replace(/\(pasif\)/gi, '').trim();
+      // dd/MM/yyyy -> dd.MM.yyyy
+      var p1 = s.split('/');
+      if (p1.length === 3) {
+        return p1[0] + '.' + p1[1] + '.' + p1[2];
+      }
+      // yyyy-MM-dd -> dd.MM.yyyy
+      var m = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+      if (m) {
+        return m[3] + '.' + m[2] + '.' + m[1];
+      }
+      // Date objesi string olarak gelirse (GMT)
+      if (s.indexOf('GMT') > -1) {
+        try {
+          var d = new Date(s);
+          return String(d.getDate()).padStart(2,'0') + '.' + String(d.getMonth()+1).padStart(2,'0') + '.' + d.getFullYear();
+        } catch(e) {}
+      }
+      return s;
+    }
+    
+    function escapeRegex(text) {
+      return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    
+    function highlightText(text, query) {
+      if (!text || !query) return escapeHtml(text);
+      var words = query.trim().split(/\s+/).filter(function(w){ return w.length > 1; });
+      if (!words.length) return escapeHtml(text);
+      var html = escapeHtml(text);
+      var highlightColor = getComputedStyle(document.documentElement).getPropertyValue('--highlight-bg').trim() || '#fff3cd';
+      words.forEach(function(w){
+        var regex = new RegExp('(' + escapeRegex(w) + ')', 'gi');
+        html = html.replace(regex, '<mark style="background:' + highlightColor + ';padding:1px 3px;border-radius:2px;font-weight:600;">$1</mark>');
+      });
+      return html;
+    }
+    
+    function renderTable() {
+      var tbody = document.getElementById('tbody');
+      tbody.innerHTML = '';
+      var query = document.getElementById('fAd').value.trim();
+      
+      filteredData.forEach(function(r){
+        var stokVar = (r.merkezDepo || 0) > 0;
+        var tr = document.createElement('tr');
+        tr.className = stokVar ? 'stok-var' : 'stok-yok';
+        
+        var tagHtml = '';
+        if (r.etiketler && r.etiketler.length > 0) {
+          tagHtml = '<span class="item-tags">' + r.etiketler.map(function(t){
+            var color = etiketColorMap[t] || '#999';
+            return '<span class="item-tag" style="background:' + color + '" onclick="toggleTagFilter(\'' + escapeHtml(t) + '\')">' + escapeHtml(t) + '</span>';
+          }).join('') + '</span>';
+        }
+        
+        var cells = [
+          '<td class="col-kod"><strong>' + escapeHtml(r.kod) + '</strong></td>',
+          '<td class="col-ad"><span class="stok-dot"></span>' + highlightText(r.ad, query) + tagHtml + '</td>',
+          '<td class="col-tags">' + tagHtml + '</td>',
+          '<td class="col-num">' + formatInt(r.merkezDepo) + '</td>',
+          '<td class="col-num">' + formatInt(r.ayrilmis) + '</td>',
+          '<td class="col-num"><strong>' + formatInt(r.satilabilir) + '</strong></td>',
+          '<td class="col-fiyat">' + formatPara(r.birim) + '</td>',
+          '<td class="col-num">' + formatPara(r.iskonto) + '</td>',
+          '<td class="col-fiyat">' + formatPara(r.net) + '</td>',
+          '<td class="col-fiyat">' + formatPara(r.nakliye) + '</td>',
+          '<td class="col-fiyat"><strong>' + formatPara(r.maliyet) + '</strong></td>',
+          '<td class="col-fat">' + escapeHtml(r.faturaNo) + '</td>',
+          '<td class="col-tarih">' + formatDate(r.faturaTarih) + '</td>',
+          '<td class="col-ted"><span class="badge ' + (r.tedarikci==='CANYAP'?'badge-canyap':'') + '">' + escapeHtml(r.tedarikci) + '</span></td>',
+          '<td class="col-link">' + 
+            (r.faturaLink && r.faturaLink.indexOf('http') === 0 ? 
+              '<a href="javascript:void(0)" onclick="openFatura(\'' + r.faturaLink + '\')" class="fatura-btn">Gör</a>' : 
+              (r.edmLink && r.edmLink.indexOf('http') === 0 ? 
+                '<a href="javascript:void(0)" onclick="openFatura(\'' + r.edmLink + '\')" style="color:#666;font-size:11px">EDM</a>' : 
+                '<span class="fatura-yok">Yok</span>')) + 
+          '</td>'
+        ];
+        
+        tr.innerHTML = cells.join('');
+        tbody.appendChild(tr);
+      });
+      
+      applyColumnVisibility();
+    }
+    
+    function toggleTagFilter(tagName) {
+      var btn = document.querySelectorAll('.tag-btn');
+      btn.forEach(function(b){
+        if (b.textContent.trim().replace('●','').trim() === tagName) {
+          b.click();
+        }
+      });
+    }
+    
+    function sort(key) {
+      sortDir[key] = !sortDir[key];
+      filteredData.sort(function(a,b){
+        var av = a[key], bv = b[key];
+        if (typeof av === 'string') av = av.toLowerCase();
+        if (typeof bv === 'string') bv = bv.toLowerCase();
+        if (av === null || av === undefined) av = '';
+        if (bv === null || bv === undefined) bv = '';
+        if (av < bv) return sortDir[key] ? -1 : 1;
+        if (av > bv) return sortDir[key] ? 1 : -1;
+        return 0;
+      });
+      renderTable();
+    }
+    
+    function formatInt(n) {
+      var num = parseFloat(n);
+      return isNaN(num) ? '-' : num.toLocaleString('tr-TR', {maximumFractionDigits:0});
+    }
+    function formatPara(n) {
+      var num = parseFloat(n);
+      return isNaN(num) || num === 0 ? '-' : num.toLocaleString('tr-TR', {minimumFractionDigits:2, maximumFractionDigits:2});
+    }
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+    
+    function openFatura(url) {
+      if (!url) return;
+      document.getElementById('faturaIframe').src = url;
+      document.getElementById('faturaModal').classList.add('active');
+      document.body.style.overflow = 'hidden';
+    }
+    function closeModal(event) {
+      if (event.target === document.getElementById('faturaModal')) closeModalDirect();
+    }
+    function closeModalDirect() {
+      document.getElementById('faturaModal').classList.remove('active');
+      document.getElementById('faturaIframe').src = '';
+      document.body.style.overflow = '';
+    }
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeModalDirect(); });
+    
+    function indirCSV() {
+      var csv = 'Stok Kodu;Stok Adi;Etiketler;Merkez Depo;Ayrilmis;Satilabilir;Birim Fiyat;Iskonto;Net;Nakliye;Maliyet;KDV;Fatura No;Fatura Tarihi;Tedarikci;Fatura Link;EDM Link\n';
+      filteredData.forEach(function(r){
+        csv += [r.kod,r.ad,(r.etiketler||[]).join(','),r.merkezDepo,r.ayrilmis,r.satilabilir,r.birim,r.iskonto,r.net,r.nakliye,r.maliyet,r.kdv,r.faturaNo,formatDate(r.faturaTarih),r.tedarikci,r.faturaLink,r.edmLink].join(';')+'\n';
+      });
+      var blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = 'fincanlar_stok_takip.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }
+    
+    window.onload = loadData;
+  </script>
+</body>
+</html>
