@@ -29,4 +29,13 @@ jobs:
         run: echo "${{ secrets.CLASPRC_JSON_B64 }}" | base64 -d > ~/.clasprc.json
 
       - name: Push to Apps Script
-        run: clasp push --force
+        run: |
+          set +e
+          OUT=$(clasp push --force 2>&1)
+          CODE=$?
+          echo "$OUT"
+          if [ $CODE -ne 0 ]; then
+            SAFE=$(echo "$OUT" | tr '\n' ' ' | head -c 900)
+            echo "::error::CLASP_PUSH_FAILED: $SAFE"
+            exit 1
+          fi
