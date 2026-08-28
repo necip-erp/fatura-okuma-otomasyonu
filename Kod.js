@@ -174,7 +174,14 @@ function isleMail(msg, shFiy, shLog) {
   // ★ DÜZELTME: htmlLink (geçici/kısa ömürlü) yerine edmLink (kalıcı) kaydediliyor.
   var urunler = faturaParseEt(faturaHTML, fatNo, gond, tarih, driveLink, edmLink);
   if (!urunler || urunler.length === 0) {
-    logYaz(shLog, fatNo, gond, tarih, "PARSE_BASARISIZ", "Ürün parse edilemedi");
+    // ★ GEÇİCİ TEŞHİS: PARSE_BASARISIZ nedenini anlamak için ham HTML hakkında
+    // kısa bir özet DETAY'a ekleniyor (uzunluk, null byte var mı, <tr> sayısı,
+    // ilk 60 karakter). Kök neden bulunduktan sonra bu satır kaldırılabilir.
+    var teshis = "len=" + faturaHTML.length +
+      " null=" + (/\x00/.test(faturaHTML)) +
+      " tr=" + ((faturaHTML.match(/<tr[\s>]/gi) || []).length) +
+      " ilk60=" + faturaHTML.substring(0, 60).replace(/[\r\n\t]/g, " ");
+    logYaz(shLog, fatNo, gond, tarih, "PARSE_BASARISIZ", "Ürün parse edilemedi | " + teshis);
     return { markRead: false };
   }
 
