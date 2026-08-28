@@ -435,11 +435,35 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
       }
     }
 
-    if (!stokKodu) continue;
+    // 3) ★ YENİ: STOK KODU hiç yok — "Sıra No | Mal Hizmet | Miktar Birim | Birim Fiyat |
+    //    İskonto Oranı | İskonto Tutarı | KDV Oranı | KDV Tutarı | Mal Hizmet Tutarı" şablonu
+    //    (örn. GPD, MUS, PAA... — Gül Pres Döküm ve benzeri tedarikçilerde görüldü).
+    //    Ayırt edici: ilk hücre kısa bir sıra numarası (1-4 haneli), ikinci hücre metin
+    //    (ürün adı) ve satırda en az 9 hücre var — bu kombinasyon faturanın başka
+    //    tablolarında (adres/toplam vb.) pratikte oluşmuyor.
+    var siraNoStil = false;
+    if (!stokKodu && tdler.length >= 9 &&
+        /^\d{1,4}$/.test(tdler[0].trim()) && !hucreSayiMi(tdler[1])) {
+      siraNoStil = true;
+      stokKodu = ""; // bu şablonda stok kodu gerçekten yok
+      stokAdi  = tdler[1].trim();
+      stokKoduIdx = 1;
+    }
+
+    if (!stokKodu && !siraNoStil) continue;
 
     var miktar, birimFiyat, iskonto, netFiyat, kdv;
 
-    if (birlesikStil) {
+    if (siraNoStil) {
+      // "50 Adet" gibi miktar+birim birleşik hücreyi ayır — baştaki sayıyı al.
+      var mbM = tdler[2].trim().match(/^([\d.,]+)/);
+      miktar = mbM ? sayiyaCevir(mbM[1]) : 0;
+      birimFiyat = sayiyaCevir(tdler[3] || "");
+      iskonto    = sayiyaCevir(tdler[4] || ""); // "%54,00" — sayiyaCevir % işaretini zaten süzüyor
+      kdv        = sayiyaCevir(tdler[6] || "");
+      var malHizmetTutari = sayiyaCevir(tdler[8] || ""); // KDV hariç, iskonto sonrası net satır tutarı
+      netFiyat = miktar > 0 ? Math.round((malHizmetTutari / miktar) * 10000) / 10000 : birimFiyat * (1 - iskonto / 100);
+    } else if (birlesikStil) {
       // Kod hücresinden sonraki hücrelerden sayısal olanları sırayla topla
       // (aradaki "Adet" gibi birim hücresi otomatik atlanır).
       var sayilar = [];
