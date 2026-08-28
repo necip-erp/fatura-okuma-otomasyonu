@@ -638,13 +638,42 @@ function sayfaCek(url) {
       followRedirects: true,
       headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
     });
-    if (resp.getResponseCode() === 200) return resp.getContentText("UTF-8");
-    Logger.log("HTTP " + resp.getResponseCode() + " — " + url);
-    return null;
+    if (resp.getResponseCode() !== 200) {
+      Logger.log("HTTP " + resp.getResponseCode() + " — " + url);
+      return null;
+    }
+    return decodeSayfaIcerigi(resp);
   } catch(e) {
     Logger.log("Fetch hatası: " + e.message);
     return null;
   }
+}
+
+// ★ DÜZELTME: EDM Bilişim'in bazı fatura sayfaları (<meta charset="utf-16">
+// ile işaretli — TOS/GL5/GEF/EK02/EFS/PAA/CNA/DPT gibi Canyap dışı tedarikçi
+// şablonları) gerçekten UTF-16 bayt dizisi olarak geliyor. Eskiden içerik
+// sabit "UTF-8" ile decode ediliyordu; bu da <tr>/<td> etiketlerini bozup
+// faturaParseEt'in hiç satır bulamamasına (PARSE_BASARISIZ) yol açıyordu.
+// Artık ham baytlardaki BOM'a (yoksa meta etiketine) bakılıp doğru encoding
+// ile decode ediliyor.
+function decodeSayfaIcerigi(resp) {
+  var bytes = resp.getContent();
+  if (bytes && bytes.length >= 2) {
+    var b0 = bytes[0] & 0xFF, b1 = bytes[1] & 0xFF;
+    if (b0 === 0xFF && b1 === 0xFE) return resp.getContentText("UTF-16LE");
+    if (b0 === 0xFE && b1 === 0xFF) return resp.getContentText("UTF-16BE");
+  }
+  var utf8 = resp.getContentText("UTF-8");
+  // BOM yoksa ama meta etiketi utf-16 diyorsa (BOM'suz UTF-16 ihtimali) yine dene.
+  // UTF-16 baytları UTF-8 olarak okununca harfler arasına \x00 sıkışır, bu yüzden
+  // kontrol öncesi \x00'ları temizliyoruz.
+  if (/charset\s*=\s*["']?utf-16/i.test(utf8.replace(/\x00/g, ""))) {
+    try {
+      var alt = resp.getContentText("UTF-16LE");
+      if (/<html/i.test(alt)) return alt;
+    } catch(e) {}
+  }
+  return utf8;
 }
 
 function linkBulMailden(body) {
