@@ -463,11 +463,37 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
       stokKoduIdx = 1;
     }
 
-    if (!stokKodu && !siraNoStil) continue;
+    // 4) ★ YENİ: kısa/nokta formatlı kod, ürün adından AYRI hücrede
+    //    (örn. "02.005", "08.001" — FME/FMF Parke Mobilya gibi tedarikçilerde görüldü).
+    //    "SIRA | KODU | AÇIKLAMASI | MIKTAR | FIYAT | KDV% | KDV | TUTAR" — iskonto sütunu
+    //    yok, TUTAR = miktar×fiyat (KDV hariç), her zaman son sütun.
+    //    Ayırt edici: 1. hücre sıra no, 2. hücre "12.345" gibi nokta içeren kısa kod
+    //    (hucreSayiMi ile sayısal görünür ama 8-15 haneli DEĞİL), 3. hücre ürün adı (metin).
+    var kisaKoduStil = false;
+    if (!stokKodu && !siraNoStil && tdler.length >= 8 &&
+        /^\d{1,4}$/.test(tdler[0].trim()) &&
+        /^\d{1,4}\.\d{1,5}$/.test(tdler[1].trim()) &&
+        !hucreSayiMi(tdler[2])) {
+      kisaKoduStil = true;
+      stokKodu = tdler[1].trim();
+      stokAdi  = tdler[2].trim();
+      stokKoduIdx = 2;
+    }
+
+    if (!stokKodu && !siraNoStil && !kisaKoduStil) continue;
 
     var miktar, birimFiyat, iskonto, netFiyat, kdv;
 
-    if (siraNoStil) {
+    if (kisaKoduStil) {
+      // "13,76 M²" gibi miktar+birim birleşik hücreyi ayır — baştaki sayıyı al.
+      var mbM3 = tdler[3].trim().match(/^([\d.,]+)/);
+      miktar = mbM3 ? sayiyaCevir(mbM3[1]) : 0;
+      birimFiyat = sayiyaCevir(tdler[4] || "");
+      iskonto = 0; // bu şablonda iskonto sütunu hiç yok
+      kdv = sayiyaCevir(tdler[5] || "");
+      var tutarNet = sayiyaCevir(tdler[tdler.length - 1] || ""); // KDV hariç, miktar×fiyat
+      netFiyat = miktar > 0 ? Math.round((tutarNet / miktar) * 10000) / 10000 : birimFiyat;
+    } else if (siraNoStil) {
       // "50 Adet" gibi miktar+birim birleşik hücreyi ayır — baştaki sayıyı al.
       var mbM = tdler[2].trim().match(/^([\d.,]+)/);
       miktar = mbM ? sayiyaCevir(mbM[1]) : 0;
