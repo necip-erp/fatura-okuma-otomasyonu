@@ -408,7 +408,11 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
         .replace(/&amp;/g, "&")
         .replace(/\s+/g, " ")
         .trim();
-      if (ic) tdler.push(ic);
+      // ★ DÜZELTME: boş hücreler ("İskonto Oranı" gibi bazı sütunlar iskonto
+      // yokken boş gelir) artık diziden SİLİNMİYOR — eskiden silinmesi, sütun
+      // pozisyonuna dayalı ayrıştırmalarda (siraNoStil vb.) tüm sütunların
+      // kaymasına ve hatalı PARSE_BASARISIZ sonucuna yol açıyordu.
+      tdler.push(ic);
     }
     if (tdler.length < 3) continue;
     satirSayisi++;
@@ -443,8 +447,10 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
     }
 
     // 3) ★ YENİ: STOK KODU hiç yok — "Sıra No | Mal Hizmet | Miktar Birim | Birim Fiyat |
-    //    İskonto Oranı | İskonto Tutarı | KDV Oranı | KDV Tutarı | Mal Hizmet Tutarı" şablonu
-    //    (örn. GPD, MUS, PAA... — Gül Pres Döküm ve benzeri tedarikçilerde görüldü).
+    //    İskonto Oranı | İskonto Tutarı | KDV Oranı | KDV Tutarı | [Diğer Vergiler |]
+    //    Mal Hizmet Tutarı" şablonu (örn. GPD, GEF, MUS, PAA... gibi tedarikçilerde
+    //    görüldü — bazılarında "Diğer Vergiler" sütunu var, bazılarında yok, bu yüzden
+    //    Mal Hizmet Tutarı sabit index yerine HER ZAMAN son sütundan okunuyor).
     //    Ayırt edici: ilk hücre kısa bir sıra numarası (1-4 haneli), ikinci hücre metin
     //    (ürün adı) ve satırda en az 9 hücre var — bu kombinasyon faturanın başka
     //    tablolarında (adres/toplam vb.) pratikte oluşmuyor.
@@ -468,7 +474,7 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
       birimFiyat = sayiyaCevir(tdler[3] || "");
       iskonto    = sayiyaCevir(tdler[4] || ""); // "%54,00" — sayiyaCevir % işaretini zaten süzüyor
       kdv        = sayiyaCevir(tdler[6] || "");
-      var malHizmetTutari = sayiyaCevir(tdler[8] || ""); // KDV hariç, iskonto sonrası net satır tutarı
+      var malHizmetTutari = sayiyaCevir(tdler[tdler.length - 1] || ""); // her zaman son sütun
       netFiyat = miktar > 0 ? Math.round((malHizmetTutari / miktar) * 10000) / 10000 : birimFiyat * (1 - iskonto / 100);
     } else if (birlesikStil) {
       // Kod hücresinden sonraki hücrelerden sayısal olanları sırayla topla
