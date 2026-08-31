@@ -185,7 +185,16 @@ function isleMail(msg, shFiy, shLog) {
     return { markRead: false };
   }
 
-  urunler = nakliyeDagit(urunler);
+  // ★ DÜZELTME: nakliyeDagit() (palet/nakliye maliyetini m²'ye göre dağıtma) SADECE
+  // Canyap faturaları için tasarlanmış özel bir kriterdir — FATURA_FILTRE boşaltılıp
+  // tüm tedarikçilerin faturaları kabul edilmeye başlandığında bu adım da yanlışlıkla
+  // TÜM tedarikçilere uygulanır hale gelmişti (örn. bir tedarikçinin ürün adında
+  // "TAŞIMA" veya "SEVK" kelimesi geçerse o kalem nakliye sanılıp seramiklere
+  // dağıtılabiliyordu). Artık sadece tedarikçi CANYAP ise çalışıyor, diğer tüm
+  // tedarikçilerin faturaları standart (netFiyat = maliyetFiyat, nakliyePayi = 0)
+  // şekilde kalıyor.
+  var canyapFaturasi = urunler.length > 0 && urunler[0].tedarikci === "CANYAP";
+  urunler = canyapFaturasi ? nakliyeDagit(urunler) : urunler;
   urunler.forEach(function(u) { fiyatYaz(shFiy, u); });
   logYaz(shLog, fatNo, gond, tarih, "BASARILI", urunler.length + " ürün");
   Logger.log("✅ " + fatNo + " → " + urunler.length + " ürün");
@@ -377,7 +386,16 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
 
   function sayiyaCevir(str) {
     if (!str) return 0;
-    var t = str.replace(/[^\d,\.]/g, "").trim();
+    // ★ DÜZELTME: eskiden TÜM string'deki rakam/virgül/nokta karakterleri (aralarında
+    // boşluk veya parantez olsa bile) tek bir sayıya birleştiriliyordu. Örn. hücre
+    // içeriği "38,88 (2)" (miktarın yanında koli/paket sayısı parantez içinde) ise
+    // eski mantık boşluk ve parantezi atıp "38,882" gibi YANLIŞ, birleşik bir sayı
+    // üretiyordu (CNY2026000002227 faturasında miktarın 38,88 yerine 38,882 görünmesinin
+    // kök nedeni buydu). Artık string içindeki İLK bitişik sayısal belirteç
+    // yakalanıyor — boşluk/parantez ile ayrılmış başka bir sayı asıl sayıya karışmıyor.
+    var m = String(str).match(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?/);
+    if (!m) return 0;
+    var t = m[0];
     t = t.replace(/\.(?=\d{3}(?:[,]|$))/g, "");
     t = t.replace(",", ".");
     return parseFloat(t) || 0;
@@ -1735,7 +1753,12 @@ function miktarlariCikarHTMLden(html) {
 
   function sayiyaCevir(str) {
     if (!str) return 0;
-    var t = str.replace(/[^\d,\.]/g, "").trim();
+    // ★ DÜZELTME (bkz. faturaParseEt içindeki aynı isimli fonksiyon): sadece string
+    // içindeki İLK bitişik sayısal belirteç alınıyor — "38,88 (2)" gibi bir hücrede
+    // parantez içindeki koli sayısı artık asıl miktara karışıp "38,882" üretmiyor.
+    var m = String(str).match(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?/);
+    if (!m) return 0;
+    var t = m[0];
     t = t.replace(/\.(?=\d{3}(?:[,]|$))/g, "");
     t = t.replace(",", ".");
     return parseFloat(t) || 0;
