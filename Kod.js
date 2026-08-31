@@ -704,6 +704,54 @@ function efatura2026Getir() {
   Logger.log("✅ 2026 tamamlandı: " + islenen + " yeni fatura işlendi, " + atlanan + " önceden işlenmiş atlandı.");
 }
 
+// ★ TEK SEFERLİK RESET (kullanıcı talebiyle eklendi — miktar birleşme hatası, nakliye
+// dağıtımının tüm tedarikçilere yanlışlıkla uygulanması ve gevşek m² kriteri gibi hataların
+// TÜM tedarikçilerin TÜM faturalarını etkilemiş olabileceği düşünüldüğü için):
+// FATURAFIYAT + FATURA_LOG sayfalarındaki TÜM veriyi siler, TÜM tedarikçilere ait
+// "e-Faturanız var" konulu mailleri (okunmuş/okunmamış fark etmeksizin) okunmadı işaretler.
+// Bundan sonra efaturaOku() (elle veya zamanlanmış tetikleyiciyle) tüm faturaları GÜNCEL kod
+// (miktar birleşme düzeltmesi, sadece-Canyap nakliye dağıtımı, kesin m² kriteri) ile baştan
+// işler.
+// ⚠️ GERİ ALINAMAZ: FATURAFIYAT ve FATURA_LOG'daki mevcut TÜM satırlar silinir. ERP'de
+// (necip-erp/Fincanlar-ERP-Programi-V2) zaten ONAYLANMIŞ Alış kayıtları bundan ETKİLENMEZ —
+// sadece henüz onaylanmamış/bekleyen ham FATURAFIYAT verisi sıfırlanır. Onaylanmış bir
+// fatura tekrar okunursa bekleyen listede TEKRAR görünür ama ikinci kez onaylanana kadar
+// muhasebeye ikinci kez işlenmez.
+// efaturaOku()'nun tek çalıştırmada 200 thread / 4,5 dakikalık sınırı olduğundan, mail
+// sayısı fazlaysa hepsi işlenene kadar birkaç kez çalıştırmak gerekebilir.
+function tumFaturalariSifirlaVeYenidenOku() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+
+  var shFiy = ss.getSheetByName(SHEET_FIYAT);
+  var silinenFiyat = 0;
+  if (shFiy && shFiy.getLastRow() > 1) {
+    silinenFiyat = shFiy.getLastRow() - 1;
+    shFiy.getRange(2, 1, silinenFiyat, shFiy.getLastColumn()).clearContent();
+  }
+
+  var shLog = ss.getSheetByName(SHEET_LOG);
+  var silinenLog = 0;
+  if (shLog && shLog.getLastRow() > 1) {
+    silinenLog = shLog.getLastRow() - 1;
+    shLog.getRange(2, 1, silinenLog, shLog.getLastColumn()).clearContent();
+  }
+
+  var threads = GmailApp.search('subject:"e-Faturanız var"', 0, 500);
+  var isaretlenen = 0;
+  threads.forEach(function(thread) {
+    thread.getMessages().forEach(function(msg) {
+      if (msg.isUnread()) return;
+      try { msg.markUnread(); isaretlenen++; } catch(e) {}
+    });
+  });
+
+  var mesaj = "Sıfırlandı: FATURAFIYAT'tan " + silinenFiyat + " satır, FATURA_LOG'dan " +
+    silinenLog + " satır silindi, " + isaretlenen + " mail okunmadı işaretlendi. " +
+    "Şimdi efaturaOku()'yu (gerekirse birkaç kez) çalıştırın.";
+  Logger.log(mesaj);
+  return { ok: true, silinenFiyatSatiri: silinenFiyat, silinenLogSatiri: silinenLog, mailIsaretlenen: isaretlenen, mesaj: mesaj };
+}
+
 function manuelEfatura2026() {
   try {
     efatura2026Getir();
@@ -1157,6 +1205,7 @@ function handleRequest(e) {
       case "saveStoklar":    result = saveStoklar(body);      break;
       case "efaturaOku":     result = manuelEfatura();      break;
       case "efatura2026":    result = manuelEfatura2026();    break;
+      case "sifirlaVeYenidenOku": result = tumFaturalariSifirlaVeYenidenOku(); break;
       case "getDashboardData": result = getCombinedDashboardData(); break;
       default:               result = { error: "Bilinmeyen action: " + action };
     }
