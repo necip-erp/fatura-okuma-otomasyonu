@@ -46,10 +46,6 @@ var NAKLIYE_KODLAR  = [
   "999997000101","331857000011","331857000012",
   "500112174100","468887000003","810103001356"
 ];
-var SERAMIK_KW = [
-  "X120","X60","X90","X45","X75","X50","X30","X20","X33","X66",
-  "61X61","60X5","42X42","42,5","60,5"
-];
 
 // Stok ayarları — filename:Canyap kaldırıldı, filtre kod içinde
 var MAIL_QUERY_STOK = "in:inbox has:attachment newer_than:7d";
@@ -287,7 +283,7 @@ function nakliyeDagit(urunler) {
 
   var seramikler = normalUrunler.filter(function(u) {
     var adUpper = (u.stokAdi || "").toUpperCase();
-    return isSeramik(adUpper) && u.miktar > 0;
+    return isM2Urunu(u.stokKodu, adUpper) && u.miktar > 0;
   });
 
   if (seramikler.length === 0) {
@@ -305,7 +301,7 @@ function nakliyeDagit(urunler) {
 
   normalUrunler.forEach(function(u) {
     var adUpper = (u.stokAdi || "").toUpperCase();
-    if (isSeramik(adUpper) && u.miktar > 0) {
+    if (isM2Urunu(u.stokKodu, adUpper) && u.miktar > 0) {
       u.nakliyePayi  = Math.round(nakliyeM2 * 10000) / 10000;
       u.maliyetFiyat = Math.round((u.netFiyat + u.nakliyePayi) * 10000) / 10000;
       Logger.log(u.stokKodu + " → nakliye:" + u.nakliyePayi + " maliyet:" + u.maliyetFiyat);
@@ -315,8 +311,32 @@ function nakliyeDagit(urunler) {
   return normalUrunler;
 }
 
-function isSeramik(adUpper) {
-  return SERAMIK_KW.some(function(kw) { return adUpper.indexOf(kw) > -1; });
+// ★ DÜZELTME: eskiden ürün adındaki gevşek anahtar kelime eşleşmesi (SERAMIK_KW) kullanılıyordu
+// — bu hem yanlış ürünleri (adında tesadüfen aynı alt dize geçen farklı bir ölçü) m² sayabiliyor
+// hem de gerçek m² ürünlerini kaçırabiliyordu. Artık kullanıcının belirttiği kesin kural
+// uygulanıyor:
+//   • Stok kodu "33" ile başlıyorsa VE ürün adında 42,5x42,5 / 45x45 / 58x58-62x62 arası
+//     (60x60 ve rektifiye toleranslı yakın ölçüler dahil) / 60x120 ölçülerinden biri varsa → m²
+//   • Stok kodu "66" ile başlıyorsa VE ürün adında 50x50 ölçüsü varsa → m²
+//   • Diğer tüm durumlarda → m² DEĞİL (nakliye/palet payı bu ürüne dağıtılmaz)
+function isM2Urunu(stokKodu, adUpper) {
+  var kod = String(stokKodu || "").trim();
+  var m = String(adUpper || "").match(/(\d{1,3}(?:,\d)?)\s*X\s*(\d{1,3}(?:,\d)?)/);
+  if (!m) return false;
+  var en = parseFloat(m[1].replace(",", "."));
+  var boy = parseFloat(m[2].replace(",", "."));
+  if (kod.indexOf("33") === 0) {
+    if (Math.abs(en - 42.5) < 0.01 && Math.abs(boy - 42.5) < 0.01) return true;
+    if (Math.abs(en - 45) < 0.01 && Math.abs(boy - 45) < 0.01) return true;
+    if (en >= 58 && en <= 62 && boy >= 58 && boy <= 62) return true; // 60x60 ve yakın (rektifiye) ölçüler
+    if (Math.abs(en - 60) < 0.01 && Math.abs(boy - 120) < 0.01) return true;
+    return false;
+  }
+  if (kod.indexOf("66") === 0) {
+    if (Math.abs(en - 50) < 0.01 && Math.abs(boy - 50) < 0.01) return true;
+    return false;
+  }
+  return false;
 }
 
 // ★ YENİ: Fatura HTML'inden doğru tarihi çıkarır — "Vade Tarihi"/"Ödeme Tarihi"ni asla kabul etmez.
