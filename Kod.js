@@ -562,7 +562,7 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
         continue; // beklenmeyen kolon sayısı — yanlış veri yazmamak için satır atlanıyor
       }
     } else {
-      // Eski (Canyap) mantığı — hiç değiştirilmedi
+      // Eski (Canyap) mantığı
       stokAdi = stokKoduIdx + 1 < tdler.length ? tdler[stokKoduIdx + 1] : "";
       miktar     = sayiyaCevir(tdler[stokKoduIdx + 2] || "");
       birimFiyat = sayiyaCevir(tdler[stokKoduIdx + 3] || "");
@@ -582,6 +582,23 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
       if (netFiyat === 0 && birimFiyat > 0) {
         netFiyat = birimFiyat * (1 - iskonto / 100);
         netFiyat = Math.round(netFiyat * 10000) / 10000;
+      }
+
+      // ★ DÜZELTME (CNY2026000002202 faturasında görülen hata): bazı Canyap tablolarında
+      // "İskonto Tutarı" veya "KDV Dahil Tutar" gibi beklenmeyen bir ek sütun araya
+      // girdiğinde, KDV_ORANI'nın sağındaki (ya da NET_FIYAT'ın kendi) hücresinden aslında
+      // KDV DAHİL bir tutar okunmuş oluyor — bu da sisteme "KDV hariç" diye kaydedilen
+      // netFiyat'ın gerçekte KDV dahil bir değer olmasına yol açıyordu. Normal şartlarda
+      // netFiyat (iskonto sonrası KDV HARİÇ birim fiyat) hiçbir zaman birimFiyat (KDV hariç
+      // liste fiyatı) değerini aşamaz — aşıyorsa ve oran yaklaşık (1+kdv/100)'e yakınsa,
+      // bu KDV dahil bir değerin yanlışlıkla netFiyat olarak okunduğunun işaretidir; KDV
+      // oranına bölünerek KDV hariç değere geri çevrilir.
+      if (birimFiyat > 0 && netFiyat > birimFiyat * 1.01 && kdv > 0) {
+        var kdvDahilOraniTahmini = netFiyat / birimFiyat;
+        if (Math.abs(kdvDahilOraniTahmini - (1 + kdv / 100)) < 0.05) {
+          Logger.log("KDV dahil/hariç düzeltmesi uygulandı (fatura " + fatNo + "): netFiyat " + netFiyat + " -> " + Math.round((netFiyat / (1 + kdv / 100)) * 10000) / 10000);
+          netFiyat = Math.round((netFiyat / (1 + kdv / 100)) * 10000) / 10000;
+        }
       }
     }
 
