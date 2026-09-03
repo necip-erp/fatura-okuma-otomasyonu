@@ -1237,6 +1237,7 @@ function handleRequest(e) {
       case "efatura2026":    result = manuelEfatura2026();    break;
       case "sifirlaVeYenidenOku": result = tumFaturalariSifirlaVeYenidenOku(); break;
       case "getDashboardData": result = getCombinedDashboardData(); break;
+      case "gecidiKontrolDebug": result = gecidiKontrolDebug(); break;
       default:               result = { error: "Bilinmeyen action: " + action };
     }
 
@@ -1249,6 +1250,29 @@ function handleRequest(e) {
     return ContentService.createTextOutput(JSON.stringify({ error: err.message }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// ★ GEÇİCİ TEŞHİS FONKSİYONU: 0 ürünle biten (PARSE_BASARISIZ) son kayıtların
+// detayını döner. Kök neden bulunduktan sonra bu fonksiyon ve case kaldırılabilir.
+function gecidiKontrolDebug() {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var shLog = ss.getSheetByName(SHEET_LOG);
+  if (!shLog) return { error: "FATURA_LOG yok" };
+  var data = shLog.getDataRange().getValues();
+  var h = data[0].map(function(x){ return String(x).toUpperCase().trim(); });
+  var iNo = h.indexOf("FATURA_NO"), iGond = h.indexOf("GONDEREN"),
+      iDurum = h.indexOf("DURUM"), iDetay = h.indexOf("DETAY"), iZaman = h.indexOf("ISLEM_ZAMANI");
+  var sonuc = [];
+  for (var i = data.length - 1; i >= 1 && sonuc.length < 25; i--) {
+    var durum = String(data[i][iDurum] || "");
+    if (durum === "PARSE_BASARISIZ") {
+      sonuc.push({
+        fatNo: data[i][iNo], gonderen: data[i][iGond],
+        detay: data[i][iDetay], zaman: data[i][iZaman]
+      });
+    }
+  }
+  return { toplamSatir: data.length - 1, parseBasarisizOrnekler: sonuc };
 }
 
 function getAllData() {
