@@ -30,3 +30,6 @@ jobs:
 
       - name: Push to Apps Script
         run: clasp push --force
+
+      - name: Deploy (sabit deploymentId'ye guncelle)
+        run: clasp deploy -i AKfycbysou4qEnAXeT1YFAuycdj3EA-eZ6alGlbHwQYe5SqmCq8jZCjJq2JGRYnyoTKk7VH9 --description "Auto-deploy from GitHub $(date +'%Y-%m-%d %H:%M')"
