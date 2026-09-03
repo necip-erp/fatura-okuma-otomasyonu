@@ -1984,3 +1984,5 @@ function miktarlariGeriDoldur() {
   Logger.log("Bu çalıştırmada: " + basarili + " başarılı, " + hatali + " hatalı, " + atlanan + " atlandı");
   Logger.log("Güncellenen satır sayısı: " + guncellenenSatir);
 }
+
+// deploy tetikleme: production Web App dagitimini guncellemek icin no-op push (deploy workflow duzeltmesi sonrasi)
