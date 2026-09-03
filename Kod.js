@@ -206,55 +206,61 @@ function faturaHtmliPDFKaydet(html, fatNo, tarih) {
   var ayKlasorler = klasor.getFoldersByName(ayKlasorAdi);
   var ayKlasoru = ayKlasorler.hasNext() ? ayKlasorler.next() : klasor.createFolder(ayKlasorAdi);
 
-  var mevcutlar = ayKlasoru.getFilesByName(fatNo + ".pdf");
-  if (mevcutlar.hasNext()) return mevcutlar.next().getUrl();
+  // ★ DÜZELTME (kullanıcı bildirimi: "fatura görseli sayfada kaymış geliyor"): önceden ham
+  // e-fatura HTML'i bir Google Doc'a yükleyip oradan PDF'e export ediyorduk. Bu dönüşüm,
+  // e-faturaların hassas tablo/hücre genişliği düzenini bozuyor (Google Docs'un HTML
+  // yorumlayıcısı karmaşık tabloları tam koruyamıyor) — sonuçta fatura "kaymış" görünüyordu.
+  // Artık ham HTML OLDUĞU GİBİ Drive'a kaydediliyor ve bu web app'in kendi doGet'i üzerinden
+  // (?faturaHtml=<fatNo>) tarayıcıda DOĞRUDAN render ediliyor: hiçbir dönüşüm/kayıp yok,
+  // fatura tarayıcıda tam orijinal haliyle (e-postadaki hâliyle) görünüyor.
+  var mevcutHtml = ayKlasoru.getFilesByName(fatNo + "_orijinal.html");
+  if (!mevcutHtml.hasNext()) {
+    ayKlasoru.createFile(Utilities.newBlob(html, "text/html", fatNo + "_orijinal.html"));
+  }
 
-  var htmlBlob = Utilities.newBlob(html, "text/html", fatNo + ".html");
-  var token = ScriptApp.getOAuthToken();
+  return ScriptApp.getService().getUrl() + "?faturaHtml=" + encodeURIComponent(fatNo);
+}
 
-  var meta = JSON.stringify({
-    name: fatNo,
-    mimeType: "application/vnd.google-apps.document",
-    parents: [ayKlasoru.getId()]
-  });
+// fatNo'ya karşılık gelen orijinal e-fatura HTML'ini Drive'daki ay klasöründen bulup
+// ham metin olarak döner. Önce FATURAFIYAT'tan o faturanın tarihini bulup doğrudan
+// ilgili ay klasörüne bakar (tüm ay klasörlerini taramaktan çok daha hızlı); orada
+// yoksa (örn. eski/taşınmış kayıtlar) tüm ay klasörlerini tarar.
+function faturaOrijinalHtmlGetir(fatNo) {
+  var klasorler = DriveApp.getFoldersByName(PDF_FOLDER);
+  if (!klasorler.hasNext()) return null;
+  var klasor = klasorler.next();
+  var dosyaAdi = fatNo + "_orijinal.html";
 
-  var boundary = "fatura_pdf_boundary";
-  var part1 = "--" + boundary + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" + meta + "\r\n";
-  part1 += "--" + boundary + "\r\nContent-Type: text/html\r\n\r\n";
-  var part2 = "\r\n--" + boundary + "--";
-
-  var allBytes = Utilities.newBlob(part1).getBytes()
-    .concat(htmlBlob.getBytes())
-    .concat(Utilities.newBlob(part2).getBytes());
-
-  var uploadResp = UrlFetchApp.fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": "Bearer " + token,
-        "Content-Type": "multipart/related; boundary=" + boundary
-      },
-      payload: allBytes,
-      muteHttpExceptions: true
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(SHEET_FIYAT);
+  if (sh) {
+    var data = sh.getDataRange().getValues();
+    var h = data[0];
+    var iFNo = h.indexOf("FATURA_NO"), iFTar = h.indexOf("FATURA_TARIHI");
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][iFNo] || "") === fatNo) {
+        var d = new Date(data[r][iFTar]);
+        if (!isNaN(d.getTime())) {
+          var ayKlasorAdi = Utilities.formatDate(d, "Europe/Istanbul", "yyyy-MM");
+          var ayKlasorler = klasor.getFoldersByName(ayKlasorAdi);
+          if (ayKlasorler.hasNext()) {
+            var dosyalar = ayKlasorler.next().getFilesByName(dosyaAdi);
+            if (dosyalar.hasNext()) return dosyalar.next().getBlob().getDataAsString("UTF-8");
+          }
+        }
+        break;
+      }
     }
-  );
+  }
 
-  var uploadResult = JSON.parse(uploadResp.getContentText());
-  if (!uploadResult.id) throw new Error("Docs yükleme hatası: " + uploadResp.getContentText().substring(0,200));
-
-  var docId = uploadResult.id;
-  var pdfResp = UrlFetchApp.fetch(
-    "https://www.googleapis.com/drive/v3/files/" + docId + "/export?mimeType=application/pdf",
-    { method: "GET", headers: { "Authorization": "Bearer " + token }, muteHttpExceptions: true }
-  );
-
-  var pdfBlob = pdfResp.getBlob().setName(fatNo + ".pdf");
-  var pdfFile = ayKlasoru.createFile(pdfBlob);
-  try { DriveApp.getFileById(docId).setTrashed(true); } catch(e) {}
-    pdfFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-  // /preview formatı direkt tarayıcıda PDF açar, izin sorunu olmaz
-  return "https://drive.google.com/file/d/" + pdfFile.getId() + "/preview";
+  // Yedek: tüm ay klasörlerini tara
+  var altKlasorler = klasor.getFolders();
+  while (altKlasorler.hasNext()) {
+    var ay = altKlasorler.next();
+    var dosyalar2 = ay.getFilesByName(dosyaAdi);
+    if (dosyalar2.hasNext()) return dosyalar2.next().getBlob().getDataAsString("UTF-8");
+  }
+  return null;
 }
 
 function nakliyeDagit(urunler) {
@@ -1194,6 +1200,13 @@ function checkStokMail() {
 // ═══════════════════════════════════════════════════════════════════
 
 function doGet(e) {
+  if (e.parameter && e.parameter.faturaHtml) {
+    var html = null;
+    try { html = faturaOrijinalHtmlGetir(String(e.parameter.faturaHtml)); } catch (err) { html = null; }
+    if (!html) html = "<p style='font-family:sans-serif;padding:20px;color:#666'>Orijinal fatura görseli bulunamadı (bu fatura, bu düzeltmeden önce işlenmiş olabilir).</p>";
+    return HtmlService.createHtmlOutput(html)
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   if (e.parameter && e.parameter.action) {
     return handleRequest(e);
   }
