@@ -32,6 +32,11 @@
 
 // ── TEK SABİT ──
 var SHEET_ID = "19t4MsvudC8X7knZ_dymBm5fghcbZcpAMwOmUXZxDPPQ";
+// ★ DÜZELTME: ScriptApp.getService().getUrl() zamanlı tetikleyiciden (trigger) çalışırken
+// canlı (/exec) yerine test (/dev) adresini döndürüyordu — bu adres normal kullanıcıya
+// hep "dosya açılamıyor" hatası veriyordu. Artık bilinen sabit canlı dağıtım adresi
+// kullanılıyor (deployment ID: AKfycbysou4qEnAXeT1YFAuycdj3EA-eZ6alGlbHwQYe5SqmCq8jZCjJq2JGRYnyoTKk7VH9).
+var WEBAPP_EXEC_URL = "https://script.google.com/macros/s/AKfycbysou4qEnAXeT1YFAuycdj3EA-eZ6alGlbHwQYe5SqmCq8jZCjJq2JGRYnyoTKk7VH9/exec";
 
 // E-Fatura ayarları
 var SHEET_FIYAT   = "FATURAFIYAT";
@@ -218,7 +223,7 @@ function faturaHtmliPDFKaydet(html, fatNo, tarih) {
     ayKlasoru.createFile(Utilities.newBlob(html, "text/html", fatNo + "_orijinal.html"));
   }
 
-  return ScriptApp.getService().getUrl() + "?faturaHtml=" + encodeURIComponent(fatNo);
+  return WEBAPP_EXEC_URL + "?faturaHtml=" + encodeURIComponent(fatNo);
 }
 
 // fatNo'ya karşılık gelen orijinal e-fatura HTML'ini Drive'daki ay klasöründen bulup
@@ -1237,7 +1242,6 @@ function handleRequest(e) {
       case "efatura2026":    result = manuelEfatura2026();    break;
       case "sifirlaVeYenidenOku": result = tumFaturalariSifirlaVeYenidenOku(); break;
       case "getDashboardData": result = getCombinedDashboardData(); break;
-      case "gecidiKontrolDebug": result = gecidiKontrolDebug(); break;
       default:               result = { error: "Bilinmeyen action: " + action };
     }
 
@@ -1250,29 +1254,6 @@ function handleRequest(e) {
     return ContentService.createTextOutput(JSON.stringify({ error: err.message }))
       .setMimeType(ContentService.MimeType.JSON);
   }
-}
-
-// ★ GEÇİCİ TEŞHİS FONKSİYONU: 0 ürünle biten (PARSE_BASARISIZ) son kayıtların
-// detayını döner. Kök neden bulunduktan sonra bu fonksiyon ve case kaldırılabilir.
-function gecidiKontrolDebug() {
-  var ss = SpreadsheetApp.openById(SHEET_ID);
-  var shLog = ss.getSheetByName(SHEET_LOG);
-  if (!shLog) return { error: "FATURA_LOG yok" };
-  var data = shLog.getDataRange().getValues();
-  var h = data[0].map(function(x){ return String(x).toUpperCase().trim(); });
-  var iNo = h.indexOf("FATURA_NO"), iGond = h.indexOf("GONDEREN"),
-      iDurum = h.indexOf("DURUM"), iDetay = h.indexOf("DETAY"), iZaman = h.indexOf("ISLEM_ZAMANI");
-  var sonuc = [];
-  for (var i = data.length - 1; i >= 1 && sonuc.length < 25; i--) {
-    var durum = String(data[i][iDurum] || "");
-    if (durum === "PARSE_BASARISIZ") {
-      sonuc.push({
-        fatNo: data[i][iNo], gonderen: data[i][iGond],
-        detay: data[i][iDetay], zaman: data[i][iZaman]
-      });
-    }
-  }
-  return { toplamSatir: data.length - 1, parseBasarisizOrnekler: sonuc };
 }
 
 function getAllData() {
