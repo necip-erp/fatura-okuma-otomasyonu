@@ -32,11 +32,6 @@
 
 // ── TEK SABİT ──
 var SHEET_ID = "19t4MsvudC8X7knZ_dymBm5fghcbZcpAMwOmUXZxDPPQ";
-// ★ DÜZELTME: ScriptApp.getService().getUrl() zamanlı tetikleyiciden (trigger) çalışırken
-// canlı (/exec) yerine test (/dev) adresini döndürüyordu — bu adres normal kullanıcıya
-// hep "dosya açılamıyor" hatası veriyordu. Artık bilinen sabit canlı dağıtım adresi
-// kullanılıyor (deployment ID: AKfycbysou4qEnAXeT1YFAuycdj3EA-eZ6alGlbHwQYe5SqmCq8jZCjJq2JGRYnyoTKk7VH9).
-var WEBAPP_EXEC_URL = "https://script.google.com/macros/s/AKfycbysou4qEnAXeT1YFAuycdj3EA-eZ6alGlbHwQYe5SqmCq8jZCjJq2JGRYnyoTKk7VH9/exec";
 
 // E-Fatura ayarları
 var SHEET_FIYAT   = "FATURAFIYAT";
@@ -223,7 +218,7 @@ function faturaHtmliPDFKaydet(html, fatNo, tarih) {
     ayKlasoru.createFile(Utilities.newBlob(html, "text/html", fatNo + "_orijinal.html"));
   }
 
-  return WEBAPP_EXEC_URL + "?faturaHtml=" + encodeURIComponent(fatNo);
+  return ScriptApp.getService().getUrl() + "?faturaHtml=" + encodeURIComponent(fatNo);
 }
 
 // fatNo'ya karşılık gelen orijinal e-fatura HTML'ini Drive'daki ay klasöründen bulup
@@ -1989,5 +1984,3 @@ function miktarlariGeriDoldur() {
   Logger.log("Bu çalıştırmada: " + basarili + " başarılı, " + hatali + " hatalı, " + atlanan + " atlandı");
   Logger.log("Güncellenen satır sayısı: " + guncellenenSatir);
 }
-
-// deploy tetikleme: production Web App dagitimini guncellemek icin no-op push (deploy workflow duzeltmesi sonrasi)
