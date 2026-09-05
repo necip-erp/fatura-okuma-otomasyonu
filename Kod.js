@@ -225,6 +225,23 @@ function faturaHtmliPDFKaydet(html, fatNo, tarih) {
 // ham metin olarak döner. Önce FATURAFIYAT'tan o faturanın tarihini bulup doğrudan
 // ilgili ay klasörüne bakar (tüm ay klasörlerini taramaktan çok daha hızlı); orada
 // yoksa (örn. eski/taşınmış kayıtlar) tüm ay klasörlerini tarar.
+// ★ EKLENDİ: Faturanın en sonundaki, içinde "IBAN" veya "BANKA HESAP" geçen <table>...</table>
+// bloğunu (varsa) kırpar. Farklı tedarikçi şablonlarında bu bilgi genelde ayrı, en sondaki
+// bir tabloda yer aldığı için sadece SON tabloyu kontrol ediyoruz — eşleşme yoksa (yani
+// tahmin tutmadıysa) HTML'i olduğu gibi, hiçbir şey silmeden döndürüyoruz (güvenli varsayılan).
+function faturaBankaBilgisiKirp(html) {
+  try {
+    var tablolar = html.match(/<table[\s\S]*?<\/table>/gi);
+    if (!tablolar || !tablolar.length) return html;
+    var sonTablo = tablolar[tablolar.length - 1];
+    if (/IBAN|BANKA HESAP/i.test(sonTablo)) {
+      var idx = html.lastIndexOf(sonTablo);
+      if (idx >= 0) return html.substring(0, idx) + html.substring(idx + sonTablo.length);
+    }
+  } catch (err) { /* bir şey ters giderse orijinal HTML'i bozmadan döndür */ }
+  return html;
+}
+
 function faturaOrijinalHtmlGetir(fatNo) {
   var klasorler = DriveApp.getFoldersByName(PDF_FOLDER);
   if (!klasorler.hasNext()) return null;
@@ -1225,6 +1242,11 @@ function doGet(e) {
     var html = null;
     try { html = faturaOrijinalHtmlGetir(String(e.parameter.faturaHtml)); } catch (err) { html = null; }
     if (!html) html = "<p style='font-family:sans-serif;padding:20px;color:#666'>Orijinal fatura görseli bulunamadı (bu fatura, bu düzeltmeden önce işlenmiş olabilir).</p>";
+    // ★ EKLENDİ: ERP'nin yanda/panelde gösterdiği kompakt görünümde faturanın alt kısmındaki
+    // banka hesap bilgisi (IBAN vb.) bölümüne gerek yok — sadece ?kompakt=1 ile istenirse
+    // en sondaki, içinde IBAN/BANKA HESAP geçen tabloyu kırpıyoruz. Tam/orijinal görünüm
+    // (yeni sekmede açma) etkilenmiyor, çünkü o zaman bu parametre gönderilmiyor.
+    if (e.parameter.kompakt === "1") html = faturaBankaBilgisiKirp(html);
     return HtmlService.createHtmlOutput(html)
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
