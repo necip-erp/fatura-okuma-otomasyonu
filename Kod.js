@@ -629,6 +629,27 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
     }
   }
 
+  // ★ DÜZELTME (CNY2026000002173 faturasında görülen hata: aynı kalem 2 kez BFM onay
+  // ekranına düşmüştü): bazı e-fatura HTML şablonlarında bir satır (stok kodu + ürün adı +
+  // miktar + birim fiyat + KDV oranı hepsi birebir aynı) teknik bir nedenle (örn. aynı
+  // tabloyu ekran/yazdırma için iki kez basan şablon yapısı) satır bazında tekrar edebiliyor.
+  // Bu şekilde HER ALANI birebir aynı olan kalemlerden sadece ilki tutulur — gerçekten aynı
+  // üründen iki ayrı satır fatura edilmiş olsaydı bile miktar+fiyatları aynı olduğundan
+  // birleştirilmeleri toplam tutarı değiştirmez.
+  var gorulenAnahtarlar = {};
+  var tekilUrunler = [];
+  for (var u = 0; u < urunler.length; u++) {
+    var un = urunler[u];
+    var anahtar = [un.stokKodu, un.stokAdi, un.miktar, un.birimFiyat, un.netFiyat, un.kdvOrani].join("||");
+    if (gorulenAnahtarlar[anahtar]) {
+      Logger.log("Mükerrer kalem atlandı (" + fatNo + "): " + un.stokAdi);
+      continue;
+    }
+    gorulenAnahtarlar[anahtar] = true;
+    tekilUrunler.push(un);
+  }
+  urunler = tekilUrunler;
+
   Logger.log("Parse: " + satirSayisi + " satır, " + urunler.length + " ürün");
   return urunler;
 }
