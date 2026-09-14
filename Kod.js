@@ -515,6 +515,24 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
     //    Ayırt edici: ilk hücre kısa bir sıra numarası (1-4 haneli), ikinci hücre metin
     //    (ürün adı) ve satırda en az 9 hücre var — bu kombinasyon faturanın başka
     //    tablolarında (adres/toplam vb.) pratikte oluşmuyor.
+    // 2b) ★ YENİ: Kod hücresi ayrı ama harf+rakam+TİRELİ (Canyap'ın saf rakamsal kodundan
+    //     farklı, örn. "PE11539-E0C000-001-K" — CAN ALÜMİNYUM gibi tedarikçilerde görüldü).
+    //     Bu şablonda sondan sabit 9 sütun var (fatura başlığıyla birebir aynı sıra):
+    //     Miktar | Miktar2 | Birim Fiyat | İskonto Oranı | İskonto Tutarı | KDV Oranı |
+    //     KDV Tutarı | Diğer Vergiler | Mal Hizmet Tutarı. Miktar sütunu m²/metretül gibi
+    //     fiyatlama birimi olabilir; gerçek STOK ADEDİ ayrı bir hücrede "21 AD" şeklinde
+    //     geçebilir — bulunursa asıl miktar olarak o kullanılır (CNA2026000012512 faturasında
+    //     görülen sorun: 12,5 m² fiyatlama miktarı yanlışlıkla stok adedi sanılıyordu).
+    var dashKoduStil = false;
+    if (!stokKodu && tdler.length >= 12 &&
+        /^\d{1,4}$/.test(tdler[0].trim()) &&
+        /^[A-Z0-9]+(-[A-Z0-9]+){2,}$/i.test(tdler[1].trim())) {
+      dashKoduStil = true;
+      stokKodu = tdler[1].trim();
+      stokAdi  = tdler[2].trim();
+      stokKoduIdx = 1;
+    }
+
     var siraNoStil = false;
     if (!stokKodu && tdler.length >= 9 &&
         /^\d{1,4}$/.test(tdler[0].trim()) && !hucreSayiMi(tdler[1])) {
@@ -545,7 +563,23 @@ function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
 
     var miktar, birimFiyat, iskonto, netFiyat, kdv;
 
-    if (kisaKoduStil) {
+    if (dashKoduStil) {
+      var n = tdler.length;
+      var malHizmetTutari = sayiyaCevir(tdler[n - 1] || "");
+      kdv     = sayiyaCevir(tdler[n - 4] || "");
+      iskonto = sayiyaCevir(tdler[n - 6] || "");
+      var fiyatlamaMiktari = sayiyaCevir(tdler[n - 9] || ""); // faturadaki fiyatlama birimi (m²/mt vb.)
+      var adetHucre = null;
+      for (var ai = stokKoduIdx + 1; ai < n - 1; ai++) {
+        var am = tdler[ai].match(/(\d+(?:[.,]\d+)?)\s*AD(?:ET)?\b/i);
+        if (am) { adetHucre = sayiyaCevir(am[1]); break; }
+      }
+      miktar = adetHucre != null ? adetHucre : fiyatlamaMiktari;
+      netFiyat = miktar > 0 ? Math.round((malHizmetTutari / miktar) * 10000) / 10000 : 0;
+      // Faturadaki "Birim Fiyat" farklı bir ölçü birimine (m²/mt) göre olduğundan,
+      // ERP'de Miktar(Adet) ile tutarlı olması için Adet bazlı fiyat kullanılır.
+      birimFiyat = netFiyat;
+    } else if (kisaKoduStil) {
       // "13,76 M²" gibi miktar+birim birleşik hücreyi ayır — baştaki sayıyı al.
       var mbM3 = tdler[3].trim().match(/^([\d.,]+)/);
       miktar = mbM3 ? sayiyaCevir(mbM3[1]) : 0;
