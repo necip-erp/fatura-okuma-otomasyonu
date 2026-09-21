@@ -342,6 +342,10 @@ function nakliyeDagit(urunler) {
 //     (60x60 ve rektifiye toleranslı yakın ölçüler dahil) / 60x120 ölçülerinden biri varsa → m²
 //   • Stok kodu "66" ile başlıyorsa VE ürün adında 50x50 ölçüsü varsa → m²
 //   • Diğer tüm durumlarda → m² DEĞİL (nakliye/palet payı bu ürüne dağıtılmaz)
+// ★ (21 Eyl 2026, CNY2026000002602 faturasında görülen hata): "33" kodlu ürünlerde 20x90 ve 30x75
+//   ölçüleri (yön fark etmez: 90x20 / 75x30 de) listede olmadığı için bu ölçüdeki ürünler nakliye
+//   dağıtımına hiç katılmıyor, TÜM nakliye tutarı listedeki tek ürüne (331560133041) yükleniyordu.
+//   Bu iki ölçü de m² ürünü sayılır → nakliye/palet bedeli hepsi arasında toplam m²'ye göre bölünür.
 function isM2Urunu(stokKodu, adUpper) {
   var kod = String(stokKodu || "").trim();
   var m = String(adUpper || "").match(/(\d{1,3}(?:,\d)?)\s*X\s*(\d{1,3}(?:,\d)?)/);
@@ -353,6 +357,8 @@ function isM2Urunu(stokKodu, adUpper) {
     if (Math.abs(en - 45) < 0.01 && Math.abs(boy - 45) < 0.01) return true;
     if (en >= 58 && en <= 62 && boy >= 58 && boy <= 62) return true; // 60x60 ve yakın (rektifiye) ölçüler
     if (Math.abs(en - 60) < 0.01 && Math.abs(boy - 120) < 0.01) return true;
+    if ((Math.abs(en - 20) < 0.01 && Math.abs(boy - 90) < 0.01) || (Math.abs(en - 90) < 0.01 && Math.abs(boy - 20) < 0.01)) return true; // 20x90
+    if ((Math.abs(en - 30) < 0.01 && Math.abs(boy - 75) < 0.01) || (Math.abs(en - 75) < 0.01 && Math.abs(boy - 30) < 0.01)) return true; // 30x75
     return false;
   }
   if (kod.indexOf("66") === 0) {
@@ -361,6 +367,71 @@ function isM2Urunu(stokKodu, adUpper) {
   }
   return false;
 }
+
+// ══════════════════════════════════════════════════════════════════
+// ★ (21 Eyl 2026) MEVCUT BİR FATURANIN NAKLİYE DAĞITIMINI YENİDEN YAP (CNY2026000002602 düzeltmesi)
+// FATURAFIYAT'ta zaten yazılmış satırlardan toplam nakliye tutarını (NAKLIYE_PAYI × MIKTAR toplamı) geri
+// hesaplar, güncel isM2Urunu() kuralına uyan TÜM kalemler arasında toplam m²'ye göre yeniden böler ve
+// NAKLIYE_PAYI + MALIYET_FIYAT sütunlarını yazar. Fatura maili yeniden okunmaz; diğer sütunlara dokunulmaz.
+// uygula=false → sadece Log'a "önce/sonra" tablosu yazar (hiçbir şey değiştirmez).
+// Tekrar çalıştırmak güvenlidir (toplam nakliye tutarı korunur).
+// NOT: Fatura ERP'de "Bekleyen Alış Faturaları"nda henüz ONAYLANMADIYSA onay ekranı yenilenince doğru payları
+// gösterir; ONAYLANMIŞSA oluşan Alış kaydı ERP'de ayrıca düzeltilmelidir (bu fonksiyon o kaydı değiştirmez).
+// ══════════════════════════════════════════════════════════════════
+function nakliyeYenidenDagit(faturaNo, uygula) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(SHEET_FIYAT);
+  if (!sh || sh.getLastRow() < 2) { Logger.log("FATURAFIYAT sayfası boş/bulunamadı"); return { ok: false, hata: "sayfa yok" }; }
+  var veri = sh.getDataRange().getValues();
+  var h = veri[0];
+  var c = { kod: h.indexOf("STOK_KODU"), ad: h.indexOf("STOK_ADI"), mik: h.indexOf("MIKTAR"), net: h.indexOf("NET_FIYAT"),
+            nak: h.indexOf("NAKLIYE_PAYI"), mal: h.indexOf("MALIYET_FIYAT"), fno: h.indexOf("FATURA_NO") };
+  for (var k in c) { if (c[k] < 0) { Logger.log("Sütun bulunamadı: " + k); return { ok: false, hata: "sütun yok: " + k }; } }
+
+  var hedef = String(faturaNo).trim();
+  var satirlar = [];
+  for (var i = 1; i < veri.length; i++) {
+    if (String(veri[i][c.fno]).trim() !== hedef) continue;
+    satirlar.push({ sat: i + 1, kod: String(veri[i][c.kod]).trim(), ad: String(veri[i][c.ad] || ""), mik: parseFloat(veri[i][c.mik]) || 0,
+                    net: parseFloat(veri[i][c.net]) || 0, nak: parseFloat(veri[i][c.nak]) || 0, mal: parseFloat(veri[i][c.mal]) || 0 });
+  }
+  if (!satirlar.length) { Logger.log("Fatura bulunamadı: " + hedef); return { ok: false, hata: "fatura yok" }; }
+
+  var toplamNakliye = 0;
+  satirlar.forEach(function(x) { toplamNakliye += x.nak * (x.mik > 0 ? x.mik : 0); });
+  Logger.log("Fatura " + hedef + ": " + satirlar.length + " kalem, mevcut dağıtılmış toplam nakliye = " + toplamNakliye.toFixed(2) + " TL");
+  if (toplamNakliye < 0.005) {
+    Logger.log("⚠ Bu faturada dağıtılmış nakliye payı yok — nakliye tutarı FATURAFIYAT'tan geri hesaplanamıyor (fatura maili yeniden okunmalı).");
+    return { ok: false, hata: "nakliye yok" };
+  }
+
+  var uygun = satirlar.filter(function(x) { return x.mik > 0 && isM2Urunu(x.kod, x.ad.toUpperCase()); });
+  if (!uygun.length) { Logger.log("⚠ m² kuralına uyan kalem yok — işlem yapılmadı."); return { ok: false, hata: "uygun kalem yok" }; }
+  var toplamM2 = 0;
+  uygun.forEach(function(x) { toplamM2 += x.mik; });
+  var nakliyeM2 = Math.round((toplamNakliye / toplamM2) * 10000) / 10000;
+  Logger.log("m² kuralına uyan " + uygun.length + " kalem, toplam " + toplamM2.toFixed(2) + " m² → nakliye/m² = " + nakliyeM2);
+
+  var degisen = 0;
+  satirlar.forEach(function(x) {
+    var uygunMu = uygun.indexOf(x) > -1;
+    var yeniNak = uygunMu ? nakliyeM2 : 0;
+    var yeniMal = Math.round((x.net + yeniNak) * 10000) / 10000;
+    var farkli = Math.abs(yeniNak - x.nak) > 0.00005 || Math.abs(yeniMal - x.mal) > 0.00005;
+    Logger.log((uygunMu ? "✔ " : "✖ ") + x.kod + " | " + x.ad + " | miktar " + x.mik + " | nakliye " + x.nak + " → " + yeniNak + " | maliyet " + x.mal + " → " + yeniMal + (farkli ? "  (DEĞİŞİR)" : ""));
+    if (!farkli) return;
+    degisen++;
+    if (uygula) {
+      sh.getRange(x.sat, c.nak + 1).setValue(yeniNak);
+      sh.getRange(x.sat, c.mal + 1).setValue(yeniMal);
+    }
+  });
+  Logger.log((uygula ? "✅ UYGULANDI: " : "ÖNİZLEME (hiçbir şey yazılmadı): ") + degisen + " satır " + (uygula ? "güncellendi" : "güncellenecek"));
+  return { ok: true, faturaNo: hedef, toplamNakliye: toplamNakliye, uygunKalem: uygun.length, toplamM2: toplamM2, nakliyeM2: nakliyeM2, degisen: degisen, uygulandi: !!uygula };
+}
+// Apps Script editöründe ▶ Çalıştır ile: önce ÖNİZLEME (Log'a önce/sonra yazar), sonra UYGULA.
+function nakliyeDuzeltOnizleme() { return nakliyeYenidenDagit("CNY2026000002602", false); }
+function nakliyeDuzeltUygula()   { return nakliyeYenidenDagit("CNY2026000002602", true); }
 
 // ★ YENİ: Fatura HTML'inden doğru tarihi çıkarır — "Vade Tarihi"/"Ödeme Tarihi"ni asla kabul etmez.
 // Hem faturaParseEt() hem de tarihleriYenidenCek() onarım fonksiyonu tarafından kullanılır.
