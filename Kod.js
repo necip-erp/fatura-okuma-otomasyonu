@@ -926,16 +926,23 @@ function fiyatYaz(sheet, u) {
     Utilities.formatDate(u.islemZamani, "Europe/Istanbul", "dd/MM/yyyy HH:mm")
   ];
 
-  sheet.insertRowAfter(1);
+  // ★ DÜZELTME (22 Eyl 2026, kullanıcı bildirimi: "gerçekte 1. sırada olan ürün sisteme
+  // son sırada geliyor"): eskiden insertRowAfter(1) ile HER kalem header'ın hemen ALTINA
+  // ekleniyordu — bu, aynı faturanın art arda yazılan kalemlerinin (ve art arda işlenen
+  // faturaların) sisteme TAM TERS sırada girmesine yol açıyordu: bir kalem yazıldıktan
+  // sonra yazılan her yeni kalem bir öncekinin ÜSTÜNE biniyordu, yani faturadaki 1. kalem
+  // en dibe düşüyordu. Artık normal şekilde sonuna ekleniyor — gerçek fatura/kalem sırası
+  // korunuyor. FATURA_TARIHI hücresinin Sheets tarafından otomatik tarihe çevrilmesini
+  // önlemek için (eskiden olduğu gibi) format, DEĞER YAZILMADAN ÖNCE metne ("@") zorlanıyor.
+  var lastRow = sheet.getLastRow();
+  sheet.insertRowAfter(lastRow);
+  var yeniSatir = lastRow + 1;
 
-  // FATURA_TARIHI kolonunu dinamik bul (MIKTAR eklenince kolon numarası kaydı) ve
-  // düz metin formatına zorla — aksi halde Sheets "dd/MM/yyyy" metnini otomatik
-  // olarak gerçek bir tarih hücresine çevirip bozuyordu.
   var baslik = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   var iFTar = baslik.indexOf("FATURA_TARIHI");
-  if (iFTar > -1) sheet.getRange(2, iFTar + 1).setNumberFormat("@");
+  if (iFTar > -1) sheet.getRange(yeniSatir, iFTar + 1).setNumberFormat("@");
 
-  sheet.getRange(2, 1, 1, satir.length).setValues([satir]);
+  sheet.getRange(yeniSatir, 1, 1, satir.length).setValues([satir]);
 }
 
 // ═══════════════════════════════════════════════════════════════════
