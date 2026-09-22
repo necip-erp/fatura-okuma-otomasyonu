@@ -309,15 +309,36 @@ function nakliyeDagit(urunler) {
     return isM2Urunu(u.stokKodu, adUpper) && u.miktar > 0;
   });
 
-  if (seramikler.length === 0) {
-    Logger.log("Seramik bulunamadı, nakliye dağıtılamadı");
-    return urunler;
-  }
-
   var toplamM2 = 0;
   seramikler.forEach(function(u) { toplamM2 += u.miktar; });
   Logger.log("Toplam m²: " + toplamM2);
-  if (toplamM2 === 0) return urunler;
+
+  // ★ GÜVENLİK FALLBACK (22 Eyl 2026, CNY2026000002634 hatası): eskiden burada m² kalemi
+  // bulunamayınca (ör. isM2Urunu listesinde olmayan yeni bir ölçü) fonksiyon nakliye/palet
+  // satırlarını DAHİL orijinal listeyi olduğu gibi döndürüyordu — bu da Nakliye/Palet
+  // kalemlerinin sahte bir stok kartı gibi FATURAFIYAT'a yazılmasına yol açıyordu (nakliye payı
+  // hiçbir kaleme yansımadığı için Nakliye Dağıtımı Kontrolü de bu faturayı hiç görmüyordu).
+  // Artık m² kuralına uyan kalem yoksa (veya toplam m²=0 ise) nakliye/palet tutarı, faturadaki
+  // TÜM normal ürünlere miktarlarıyla orantılı dağıtılıyor; Nakliye/Palet satırları HER
+  // DURUMDA listeden çıkarılıp normal bir stok kalemi olarak asla kaydedilmiyor.
+  if (seramikler.length === 0 || toplamM2 === 0) {
+    Logger.log("m² kuralına uyan kalem bulunamadı — nakliye/palet TÜM normal ürünlere miktar bazlı dağıtılıyor (fallback)");
+    var toplamMiktar = 0;
+    normalUrunler.forEach(function(u) { if (u.miktar > 0) toplamMiktar += u.miktar; });
+    if (toplamMiktar === 0) {
+      Logger.log("⚠ Dağıtılacak normal ürün bulunamadı, nakliye/palet tutarı hiçbir kaleme yansıtılamadı: " + toplamNakliye + " TL");
+      return normalUrunler;
+    }
+    var nakliyeBirim = toplamNakliye / toplamMiktar;
+    normalUrunler.forEach(function(u) {
+      if (u.miktar > 0) {
+        u.nakliyePayi  = Math.round(nakliyeBirim * 10000) / 10000;
+        u.maliyetFiyat = Math.round((u.netFiyat + u.nakliyePayi) * 10000) / 10000;
+        Logger.log(u.stokKodu + " (fallback) → nakliye:" + u.nakliyePayi + " maliyet:" + u.maliyetFiyat);
+      }
+    });
+    return normalUrunler;
+  }
 
   var nakliyeM2 = toplamNakliye / toplamM2;
   Logger.log("Nakliye/m²: " + nakliyeM2.toFixed(4) + " TL");
@@ -346,6 +367,10 @@ function nakliyeDagit(urunler) {
 //   ölçüleri (yön fark etmez: 90x20 / 75x30 de) listede olmadığı için bu ölçüdeki ürünler nakliye
 //   dağıtımına hiç katılmıyor, TÜM nakliye tutarı listedeki tek ürüne (331560133041) yükleniyordu.
 //   Bu iki ölçü de m² ürünü sayılır → nakliye/palet bedeli hepsi arasında toplam m²'ye göre bölünür.
+// ★ (22 Eyl 2026, CNY2026000002634 faturasında görülen hata): "33" kodlu 30x60 ölçüsü de listede
+//   yoktu — faturada başka hiçbir m² kalemi olmadığından seramikler.length=0 oldu, nakliyeDagit()
+//   fallback'inde Nakliye/Palet kalemleri gerçek stok satırıymış gibi FATURAFIYAT'a yazıldı (bkz.
+//   nakliyeDagit() içindeki güvenlik fallback'i). 30x60 artık m² ürünü sayılıyor.
 function isM2Urunu(stokKodu, adUpper) {
   var kod = String(stokKodu || "").trim();
   var m = String(adUpper || "").match(/(\d{1,3}(?:,\d)?)\s*X\s*(\d{1,3}(?:,\d)?)/);
@@ -359,6 +384,7 @@ function isM2Urunu(stokKodu, adUpper) {
     if (Math.abs(en - 60) < 0.01 && Math.abs(boy - 120) < 0.01) return true;
     if ((Math.abs(en - 20) < 0.01 && Math.abs(boy - 90) < 0.01) || (Math.abs(en - 90) < 0.01 && Math.abs(boy - 20) < 0.01)) return true; // 20x90
     if ((Math.abs(en - 30) < 0.01 && Math.abs(boy - 75) < 0.01) || (Math.abs(en - 75) < 0.01 && Math.abs(boy - 30) < 0.01)) return true; // 30x75
+    if ((Math.abs(en - 30) < 0.01 && Math.abs(boy - 60) < 0.01) || (Math.abs(en - 60) < 0.01 && Math.abs(boy - 30) < 0.01)) return true; // 30x60 (CNY2026000002634: ELBA BEYAZ 30X60)
     return false;
   }
   if (kod.indexOf("66") === 0) {
@@ -432,6 +458,105 @@ function nakliyeYenidenDagit(faturaNo, uygula) {
 // Apps Script editöründe ▶ Çalıştır ile: önce ÖNİZLEME (Log'a önce/sonra yazar), sonra UYGULA.
 function nakliyeDuzeltOnizleme() { return nakliyeYenidenDagit("CNY2026000002602", false); }
 function nakliyeDuzeltUygula()   { return nakliyeYenidenDagit("CNY2026000002602", true); }
+
+// ══════════════════════════════════════════════════════════════════
+// ★ (22 Eyl 2026) CNY2026000002634'E ÖZEL DÜZELTME
+// Bu faturada "ELBA BEYAZ 30X60" ölçüsü isM2Urunu() listesinde olmadığı için nakliye/palet
+// (toplam 4.435 TL: "PALET TERMAL EURO KARO PALETİ" 1.400 TL + "NAKLİYE BEDELİ YANSITMA" 3.035 TL
+// + "TERMALKİM PALET" 0 TL) HİÇ dağıtılmadan, sahte birer stok kalemi gibi FATURAFIYAT'a yazıldı.
+// nakliyeYenidenDagit() bu faturada ÇALIŞMAZ çünkü o fonksiyon mevcut dağıtılmış NAKLIYE_PAYI'yi
+// geri toplayarak çalışır — burada dağıtılmış hiçbir pay yok (hepsi sahte stok satırı).
+// Bu fonksiyon: FATURAFIYAT'ta bu faturaya ait Nakliye/Palet satırlarını (NAKLIYE_KW/NAKLIYE_KODLAR
+// ile aynı tespit mantığı) bulur, tutarlarını toplar, bu satırları SİLER, kalan gerçek ürünlere
+// (artık düzeltilmiş isM2Urunu() kuralına göre — bu faturada sadece ELBA BEYAZ 30X60) tutarı
+// m²'ye göre dağıtır. uygula=false → sadece Log'a ne yapılacağını yazar, hiçbir şeyi değiştirmez.
+// Tekrar çalıştırmak güvenlidir (Nakliye/Palet satırları zaten silindiyse "bulunamadı" der).
+// NOT: Fatura ERP'de "Bekleyen Alış Faturaları"nda henüz ONAYLANMADIYSA ekran yenilenince doğru
+// hâlini gösterir; ONAYLANMIŞSA oluşan Alış kaydı ERP'de ayrıca elle düzeltilmelidir.
+// ══════════════════════════════════════════════════════════════════
+function nakliyeDuzeltCNY2634(uygula) {
+  var FATURA_NO_HEDEF = "CNY2026000002634";
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(SHEET_FIYAT);
+  if (!sh || sh.getLastRow() < 2) { Logger.log("FATURAFIYAT sayfası boş/bulunamadı"); return { ok: false, hata: "sayfa yok" }; }
+  var veri = sh.getDataRange().getValues();
+  var h = veri[0];
+  var c = { kod: h.indexOf("STOK_KODU"), ad: h.indexOf("STOK_ADI"), mik: h.indexOf("MIKTAR"), net: h.indexOf("NET_FIYAT"),
+            nak: h.indexOf("NAKLIYE_PAYI"), mal: h.indexOf("MALIYET_FIYAT"), fno: h.indexOf("FATURA_NO") };
+  for (var k in c) { if (c[k] < 0) { Logger.log("Sütun bulunamadı: " + k); return { ok: false, hata: "sütun yok: " + k }; } }
+
+  var sahteNakliyeSatirlari = [];  // silinecek: {sat, kod, ad, tutar}
+  var normalSatirlar = [];         // kalacak, payı güncellenecek: {sat, kod, ad, mik, net}
+  for (var i = 1; i < veri.length; i++) {
+    if (String(veri[i][c.fno]).trim() !== FATURA_NO_HEDEF) continue;
+    var kod = String(veri[i][c.kod]).trim();
+    var ad  = String(veri[i][c.ad] || "");
+    var adUpper = ad.toUpperCase();
+    var mik = parseFloat(veri[i][c.mik]) || 0;
+    var net = parseFloat(veri[i][c.net]) || 0;
+    var isNakliyeKw  = NAKLIYE_KW.some(function(kw) { return adUpper.indexOf(kw) > -1; });
+    var isNakliyeKod = NAKLIYE_KODLAR.indexOf(kod) > -1;
+    if (isNakliyeKw || isNakliyeKod) {
+      sahteNakliyeSatirlari.push({ sat: i + 1, kod: kod, ad: ad, tutar: net * (mik > 0 ? mik : 1) });
+    } else {
+      normalSatirlar.push({ sat: i + 1, kod: kod, ad: ad, mik: mik, net: net });
+    }
+  }
+  if (!sahteNakliyeSatirlari.length) {
+    Logger.log("Fatura " + FATURA_NO_HEDEF + ": sahte Nakliye/Palet satırı bulunamadı (zaten düzeltilmiş olabilir).");
+    return { ok: false, hata: "sahte nakliye satırı yok" };
+  }
+  if (!normalSatirlar.length) {
+    Logger.log("Fatura " + FATURA_NO_HEDEF + ": hiç normal ürün kalemi yok — dağıtım yapılamaz.");
+    return { ok: false, hata: "normal ürün yok" };
+  }
+
+  var toplamNakliye = 0;
+  sahteNakliyeSatirlari.forEach(function(x) { toplamNakliye += x.tutar; });
+  Logger.log("Fatura " + FATURA_NO_HEDEF + ": " + sahteNakliyeSatirlari.length + " sahte Nakliye/Palet satırı (toplam " +
+    toplamNakliye.toFixed(2) + " TL) siline" + (uygula ? "cek" : "cekti (önizleme)") + ":");
+  sahteNakliyeSatirlari.forEach(function(x) { Logger.log("  ✖ SİL: " + x.kod + " | " + x.ad + " | " + x.tutar.toFixed(2) + " TL"); });
+
+  var seramikler = normalSatirlar.filter(function(u) { return isM2Urunu(u.kod, u.ad.toUpperCase()) && u.mik > 0; });
+  var toplamM2 = 0;
+  seramikler.forEach(function(u) { toplamM2 += u.mik; });
+
+  var hedefKalemler, birimBasi, birimAciklama;
+  if (seramikler.length > 0 && toplamM2 > 0) {
+    hedefKalemler = seramikler;
+    birimBasi = Math.round((toplamNakliye / toplamM2) * 10000) / 10000;
+    birimAciklama = "m²";
+  } else {
+    Logger.log("⚠ m² kuralına uyan kalem yok — fallback: tüm normal ürünlere miktar bazlı dağıtılıyor.");
+    hedefKalemler = normalSatirlar.filter(function(u) { return u.mik > 0; });
+    var toplamMiktar = 0;
+    hedefKalemler.forEach(function(u) { toplamMiktar += u.mik; });
+    birimBasi = Math.round((toplamNakliye / toplamMiktar) * 10000) / 10000;
+    birimAciklama = "birim";
+  }
+
+  hedefKalemler.forEach(function(u) {
+    var yeniMal = Math.round((u.net + birimBasi) * 10000) / 10000;
+    Logger.log("  ✔ " + u.kod + " | " + u.ad + " | nakliye 0 → " + birimBasi + " (" + birimAciklama + " başı) | maliyet " + u.net + " → " + yeniMal);
+    if (uygula) {
+      sh.getRange(u.sat, c.nak + 1).setValue(birimBasi);
+      sh.getRange(u.sat, c.mal + 1).setValue(yeniMal);
+    }
+  });
+
+  if (uygula) {
+    sahteNakliyeSatirlari.map(function(x) { return x.sat; }).sort(function(a, b) { return b - a; })
+      .forEach(function(satNo) { sh.deleteRow(satNo); });
+  }
+
+  Logger.log((uygula ? "✅ UYGULANDI: " : "ÖNİZLEME (hiçbir şey yazılmadı/silinmedi): ") +
+    sahteNakliyeSatirlari.length + " sahte satır silin" + (uygula ? "di" : "ecek") + ", " +
+    hedefKalemler.length + " ürüne nakliye payı " + (uygula ? "yazıldı" : "yazılacak") + ".");
+  return { ok: true, faturaNo: FATURA_NO_HEDEF, toplamNakliye: toplamNakliye, silinenSatir: sahteNakliyeSatirlari.length,
+           guncellenenUrun: hedefKalemler.length, birimBasi: birimBasi, birimAciklama: birimAciklama, uygulandi: !!uygula };
+}
+function nakliyeDuzeltCNY2634Onizleme() { return nakliyeDuzeltCNY2634(false); }
+function nakliyeDuzeltCNY2634Uygula()   { return nakliyeDuzeltCNY2634(true); }
 
 // ★ YENİ: Fatura HTML'inden doğru tarihi çıkarır — "Vade Tarihi"/"Ödeme Tarihi"ni asla kabul etmez.
 // Hem faturaParseEt() hem de tarihleriYenidenCek() onarım fonksiyonu tarafından kullanılır.
