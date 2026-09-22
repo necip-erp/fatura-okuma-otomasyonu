@@ -558,6 +558,47 @@ function nakliyeDuzeltCNY2634(uygula) {
 function nakliyeDuzeltCNY2634Onizleme() { return nakliyeDuzeltCNY2634(false); }
 function nakliyeDuzeltCNY2634Uygula()   { return nakliyeDuzeltCNY2634(true); }
 
+// ══════════════════════════════════════════════════════════════════
+// ★ (22 Eyl 2026) GEÇMİŞTE YANLIŞ SIRADA YAZILMIŞ TÜM FATURAFIYAT SATIRLARINI DÜZELT
+// fiyatYaz() eskiden HER kalemi insertRowAfter(1) ile header'ın hemen altına ekliyordu
+// (bkz. fiyatYaz düzeltmesi) — bu, sayfanın veri gövdesinin (2. satırdan itibaren) BAŞTAN
+// SONA TAM TERS sırada birikmesine yol açtı: hem bir faturanın kendi kalemleri ters, hem de
+// art arda işlenen faturaların kendisi ters sırada. Bu, saf bir LIFO(yığın) davranışı olduğu
+// için TEK bir düzeltme yeterli: sayfanın 2. satırdan son satıra kadar olan TÜM verisini
+// TERSİNE ÇEVİRMEK — bu hem kalem hem fatura sırasını aynı anda doğru gerçek/kronolojik
+// sıraya döndürür. (ERP hiçbir zaman bu sayfaya yeni satır YAZMAZ, sadece okur — bu yüzden
+// aradaki tek satır silmeler/hücre güncellemeleri dışında sıralamayı bozan başka bir işlem
+// yok, ters çevirme güvenli.)
+// uygula=false → sadece Log'a önce/sonra ilk birkaç satırı gösterir, hiçbir şey yazmaz.
+// NOT: fiyatYaz() artık düzeltildiği için bu fonksiyon SADECE bu düzeltmeden ÖNCE yazılmış
+// eski satırlar için bir kereliğine gerekli — yeni gelen faturalar zaten doğru sırada yazılıyor.
+// ══════════════════════════════════════════════════════════════════
+function fatFiyatSiraTersineCevir(uygula) {
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var sh = ss.getSheetByName(SHEET_FIYAT);
+  if (!sh || sh.getLastRow() < 3) { Logger.log("Sıralamayı değiştirecek yeterli veri yok."); return { ok: false, hata: "veri yok" }; }
+
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  var veri = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var ters = veri.slice().reverse();
+
+  function ozet(dizi) {
+    return dizi.slice(0, 3).map(function(r) { return r[0] + " | " + r[1] + " | " + r[9]; }).join("  ||  ");
+  }
+  Logger.log("FATURAFIYAT: " + veri.length + " satır " + (uygula ? "TERSİNE ÇEVRİLİYOR." : "tersine çevrilecek (ÖNİZLEME — hiçbir şey yazılmadı)."));
+  Logger.log("ŞU AN ilk 3 satır   (kod | ad | fatura no): " + ozet(veri));
+  Logger.log("SONRASI ilk 3 satır (kod | ad | fatura no): " + ozet(ters));
+
+  if (uygula) {
+    sh.getRange(2, 1, ters.length, lastCol).setValues(ters);
+    Logger.log("✅ UYGULANDI: " + ters.length + " satır tersine çevrildi.");
+  }
+  return { ok: true, satirSayisi: veri.length, uygulandi: !!uygula };
+}
+function fatFiyatSiraTersineCevirOnizleme() { return fatFiyatSiraTersineCevir(false); }
+function fatFiyatSiraTersineCevirUygula()   { return fatFiyatSiraTersineCevir(true); }
+
 // ★ YENİ: Fatura HTML'inden doğru tarihi çıkarır — "Vade Tarihi"/"Ödeme Tarihi"ni asla kabul etmez.
 // Hem faturaParseEt() hem de tarihleriYenidenCek() onarım fonksiyonu tarafından kullanılır.
 function tarihCikarHTMLden(html, yedekTarih) {
