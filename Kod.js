@@ -234,12 +234,32 @@ function faturaBankaBilgisiKirp(html) {
     var tablolar = html.match(/<table[\s\S]*?<\/table>/gi);
     if (!tablolar || !tablolar.length) return html;
     var sonTablo = tablolar[tablolar.length - 1];
-    if (/IBAN|BANKA HESAP/i.test(sonTablo)) {
+    // Kırpılacak alt bölümler: (1) banka/IBAN bilgisi, (2) fatura altındaki not kutusu
+    // (Toplam Miktar / Vade Tarihi / Sevk Adresi / "YALNIZ ..." / Ödeme Tarihi). Ürün (Mal Hizmet) veya
+    // toplam tablosu asla kırpılmaz.
+    var urunTablosuMu = /Mal\s*Hizmet|S[ıi]ra\s*No|Ara\s*Toplam|Ödenecek\s*Tutar/i.test(sonTablo);
+    var kirpilir = /IBAN|BANKA HESAP/i.test(sonTablo) ||
+      (!urunTablosuMu && /Vade\s*Tarihi|Toplam\s*Miktar|YALNIZ|Ödeme\s*Tarihi|SEVK\s*ADRES/i.test(sonTablo));
+    if (kirpilir) {
       var idx = html.lastIndexOf(sonTablo);
-      if (idx >= 0) return html.substring(0, idx) + html.substring(idx + sonTablo.length);
+      if (idx >= 0) html = html.substring(0, idx) + html.substring(idx + sonTablo.length);
     }
   } catch (err) { /* bir şey ters giderse orijinal HTML'i bozmadan döndür */ }
   return html;
+}
+
+// ERP'nin fatura görselini içeriğin GERÇEK boyutuna göre sığdırabilmesi için sayfa, kendi içerik boyutunu
+// üst pencereye bildirir (postMessage). Sadece ?kompakt=1 görünümünde eklenir.
+function faturaBoyutBildirimiEkle(html) {
+  var js = '<script>(function(){function g(){try{var b=document.body,d=document.documentElement;' +
+    'var w=Math.max(b.scrollWidth,d.scrollWidth),h=0;var e=b.children;for(var i=0;i<e.length;i++){var r=e[i].getBoundingClientRect();if(r.bottom>h)h=r.bottom;}' +
+    'h=Math.ceil(h+(window.pageYOffset||0));if(!h)h=Math.max(b.scrollHeight,d.scrollHeight);' +
+    'window.top.postMessage({tip:"faturaBoyut",w:w,h:h},"*");}catch(x){}}' +
+    'window.addEventListener("load",function(){g();setTimeout(g,300);setTimeout(g,1200);});})();<\/script>';
+  try {
+    if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, js + '</body>');
+    return html + js;
+  } catch (err) { return html; }
 }
 
 function faturaOrijinalHtmlGetir(fatNo) {
@@ -1524,7 +1544,7 @@ function doGet(e) {
     // banka hesap bilgisi (IBAN vb.) bölümüne gerek yok — sadece ?kompakt=1 ile istenirse
     // en sondaki, içinde IBAN/BANKA HESAP geçen tabloyu kırpıyoruz. Tam/orijinal görünüm
     // (yeni sekmede açma) etkilenmiyor, çünkü o zaman bu parametre gönderilmiyor.
-    if (e.parameter.kompakt === "1") html = faturaBankaBilgisiKirp(html);
+    if (e.parameter.kompakt === "1") html = faturaBoyutBildirimiEkle(faturaBankaBilgisiKirp(html));
     return HtmlService.createHtmlOutput(html)
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
