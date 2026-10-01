@@ -230,32 +230,44 @@ function faturaHtmliPDFKaydet(html, fatNo, tarih) {
 // bir tabloda yer aldığı için sadece SON tabloyu kontrol ediyoruz — eşleşme yoksa (yani
 // tahmin tutmadıysa) HTML'i olduğu gibi, hiçbir şey silmeden döndürüyoruz (güvenli varsayılan).
 function faturaBankaBilgisiKirp(html) {
+  // Kompakt görünümde "Ödenecek Tutar" satırının bulunduğu toplamlar tablosundan SONRAKİ her şey (banka/IBAN,
+  // Toplam Miktar / Vade / YALNIZ / Ödeme Tarihi kutusu vb.) silinir. Kesin kırpma, sayfa yüklenince DOM üzerinden
+  // (faturaBoyutBildirimiEkle içindeki betik) yapılır; burada ek olarak ham HTML'de de kırpılır.
   try {
-    var tablolar = html.match(/<table[\s\S]*?<\/table>/gi);
-    if (!tablolar || !tablolar.length) return html;
-    var sonTablo = tablolar[tablolar.length - 1];
-    // Kırpılacak alt bölümler: (1) banka/IBAN bilgisi, (2) fatura altındaki not kutusu
-    // (Toplam Miktar / Vade Tarihi / Sevk Adresi / "YALNIZ ..." / Ödeme Tarihi). Ürün (Mal Hizmet) veya
-    // toplam tablosu asla kırpılmaz.
-    var urunTablosuMu = /Mal\s*Hizmet|S[ıi]ra\s*No|Ara\s*Toplam|Ödenecek\s*Tutar/i.test(sonTablo);
-    var kirpilir = /IBAN|BANKA HESAP/i.test(sonTablo) ||
-      (!urunTablosuMu && /Vade\s*Tarihi|Toplam\s*Miktar|YALNIZ|Ödeme\s*Tarihi|SEVK\s*ADRES/i.test(sonTablo));
-    if (kirpilir) {
-      var idx = html.lastIndexOf(sonTablo);
-      if (idx >= 0) html = html.substring(0, idx) + html.substring(idx + sonTablo.length);
+    var re = /(?:&Ouml;|&ouml;|Ö|ö|O|o)denecek\s*Tutar/gi, m, son = -1;
+    while ((m = re.exec(html)) !== null) son = m.index;
+    if (son >= 0) {
+      var kapanis = html.indexOf('</table>', son);
+      if (kapanis >= 0) {
+        var kes = kapanis + 8;
+        var govdeSonu = html.search(/<\/body>/i);
+        var son2 = govdeSonu >= 0 ? govdeSonu : html.length;
+        if (kes < son2) html = html.substring(0, kes) + html.substring(son2);
+      }
     }
-  } catch (err) { /* bir şey ters giderse orijinal HTML'i bozmadan döndür */ }
+  } catch (err) { /* orijinal HTML bozulmasın */ }
   return html;
 }
 
-// ERP'nin fatura görselini içeriğin GERÇEK boyutuna göre sığdırabilmesi için sayfa, kendi içerik boyutunu
-// üst pencereye bildirir (postMessage). Sadece ?kompakt=1 görünümünde eklenir.
+// ERP fatura görselini içeriğin GERÇEK boyutuna göre sığdırabilsin diye sayfa, kendi içerik boyutunu üst pencereye
+// bildirir (postMessage). Aynı betik "Ödenecek Tutar" tablosundan sonraki tüm öğeleri DOM'dan da siler.
+// Sadece ?kompakt=1 görünümünde eklenir.
 function faturaBoyutBildirimiEkle(html) {
-  var js = '<script>(function(){function g(){try{var b=document.body,d=document.documentElement;' +
-    'var w=Math.max(b.scrollWidth,d.scrollWidth),h=0;var e=b.children;for(var i=0;i<e.length;i++){var r=e[i].getBoundingClientRect();if(r.bottom>h)h=r.bottom;}' +
-    'h=Math.ceil(h+(window.pageYOffset||0));if(!h)h=Math.max(b.scrollHeight,d.scrollHeight);' +
+  var js = '<script>(function(){' +
+    'function kes(){try{var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false),n,son=null;' +
+    'while((n=w.nextNode())){if(/[\\u00d6\\u00f6Oo]denecek\\s*Tutar/i.test(n.nodeValue))son=n;}' +
+    'if(!son)return;var t=son.parentNode;while(t&&t!==document.body&&t.nodeName!=="TABLE")t=t.parentNode;' +
+    'if(!t||t===document.body)return;' +
+    'for(var c=t;c&&c!==document.body;c=c.parentNode){while(c.nextSibling){c.parentNode.removeChild(c.nextSibling);}}' +
+    '}catch(x){}}' +
+    'function g(){try{var b=document.body,d=document.documentElement;' +
+    'var w=Math.max(b.scrollWidth,d.scrollWidth),h=0;var e=b.getElementsByTagName("*");' +
+    'for(var i=0;i<e.length;i++){var r=e[i].getBoundingClientRect();if(r.bottom>h)h=r.bottom;}' +
+    'h=Math.ceil(h+(window.pageYOffset||0)+8);if(!h)h=Math.max(b.scrollHeight,d.scrollHeight);' +
     'window.top.postMessage({tip:"faturaBoyut",w:w,h:h},"*");}catch(x){}}' +
-    'window.addEventListener("load",function(){g();setTimeout(g,300);setTimeout(g,1200);});})();<\/script>';
+    'function hepsi(){kes();g();}' +
+    'if(document.readyState==="complete")hepsi();window.addEventListener("load",function(){hepsi();setTimeout(hepsi,300);setTimeout(hepsi,1200);});' +
+    '})();<\/script>';
   try {
     if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, js + '</body>');
     return html + js;
