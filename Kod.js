@@ -260,10 +260,13 @@ function faturaBoyutBildirimiEkle(html) {
     'if(!t||t===document.body)return;' +
     'for(var c=t;c&&c!==document.body;c=c.parentNode){while(c.nextSibling){c.parentNode.removeChild(c.nextSibling);}}' +
     '}catch(x){}}' +
-    'function g(){try{var b=document.body,d=document.documentElement;' +
-    'var w=Math.max(b.scrollWidth,d.scrollWidth),h=0;var e=b.getElementsByTagName("*");' +
-    'for(var i=0;i<e.length;i++){var r=e[i].getBoundingClientRect();if(r.bottom>h)h=r.bottom;}' +
-    'h=Math.ceil(h+(window.pageYOffset||0)+8);if(!h)h=Math.max(b.scrollHeight,d.scrollHeight);' +
+    'function g(){try{var b=document.body,st=b.style,o1=st.display,o2=st.width,o3=st.margin;' +
+    // Doğal (içeriğin kendi) boyutu: body'yi geçici olarak içeriğe sıkıştırıp ölçeriz. scrollWidth KULLANILMAZ — o,
+    // iframe görüntü alanından küçük olamaz ve ERP'de zoom küçüldükçe büyüyerek zoom'u %50'de kilitliyordu.
+    'st.display="inline-block";st.width="max-content";' +
+    'var cs=getComputedStyle(b),mx=(parseFloat(cs.marginLeft)||0)+(parseFloat(cs.marginRight)||0),my=(parseFloat(cs.marginTop)||0)+(parseFloat(cs.marginBottom)||0);' +
+    'var w=Math.ceil(b.offsetWidth+mx),h=Math.ceil(b.offsetHeight+my);' +
+    'st.display=o1;st.width=o2;st.margin=o3;' +
     'window.top.postMessage({tip:"faturaBoyut",w:w,h:h},"*");}catch(x){}}' +
     'function hepsi(){kes();g();}' +
     'if(document.readyState==="complete")hepsi();window.addEventListener("load",function(){hepsi();setTimeout(hepsi,300);setTimeout(hepsi,1200);});' +
