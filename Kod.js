@@ -169,7 +169,7 @@ function efaturaTaraVeKaydet_() {
     if (r.ok && !r.devam) p.setProperty("TARAMA_SON", bas.toISOString());
     if (r.ok) {
       p.setProperty("TARAMA_SON_SONUC",
-        (r.devam ? "Yarım kaldı (devam edilecek) · " : "") + r.yeni + " yeni fatura işlendi, " + r.hatali + " işlenemedi, " + r.atlanan + " zaten kayıtlı" + (r.hataOzeti ? " | " + r.hataOzeti : ""));
+        (r.devam ? "Yarım kaldı (devam edilecek) · " : "") + r.yeni + " yeni fatura işlendi, " + r.hatali + " işlenemedi, " + r.atlanan + " zaten kayıtlı, " + (r.urunYok || 0) + " ürünsüz (gider) fatura" + (r.hataOzeti ? " | " + r.hataOzeti : ""));
     }
     return r;
   } finally {
@@ -193,7 +193,7 @@ function efaturaTara_() {
     ["FATURA_NO","GONDEREN","TARIH","DURUM","DETAY","ISLEM_ZAMANI"]);
 
   // Bağlam: FATURAFIYAT'taki fatura no'lar (tek okuma) + son log satırları (spam önleme)
-  var ctx = { basari: {}, logAnahtar: {}, yeni: 0, hatali: 0, atlanan: 0 };
+  var ctx = { basari: {}, logAnahtar: {}, yeni: 0, hatali: 0, atlanan: 0, urunYok: 0 };
   var fData = shFiy.getDataRange().getValues();
   if (fData.length > 1) {
     var fi = fData[0].indexOf("FATURA_NO");
@@ -238,7 +238,8 @@ function efaturaTara_() {
           var sonuc = isleMail(msg, shFiy, shLog);
           if (sonuc && sonuc.markRead) {
             if (msg.isUnread()) msg.markRead();
-            if (sonuc.yeni) { ctx.yeni++; if (no) ctx.basari[no] = true; }
+            if (sonuc.urunYok) ctx.urunYok++;
+            else if (sonuc.yeni) { ctx.yeni++; if (no) ctx.basari[no] = true; }
             else ctx.atlanan++;
           } else {
             ctx.hatali++;
@@ -262,7 +263,7 @@ function efaturaTara_() {
   var ozet = Object.keys(sayac).map(function(k) { return k + ": " + sayac[k]; }).join(", ");
   if (ozet) ozet += " | Örnek: " + ornek.join("; ");
   if (ctx.ornekler) ozet += " || ŞABLON: " + Object.keys(ctx.ornekler).map(function(k) { return k + "→ " + ctx.ornekler[k]; }).join(" ## ");
-  return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan, hataOzeti: ozet };
+  return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan, urunYok: ctx.urunYok, hataOzeti: ozet };
 }
 
 function isleMail(msg, shFiy, shLog) {
@@ -288,6 +289,9 @@ function isleMail(msg, shFiy, shLog) {
     Logger.log("Zaten işlendi: " + fatNo);
     return { markRead: true };
   }
+
+  var urunYokKey = fatNo || konu.substring(0, 80);
+  if (_scanCtx && _scanCtx.logAnahtar[urunYokKey + "|URUN_TABLOSU_YOK"]) return { markRead: true, urunYok: true };
 
   var edmLink = linkBulMailden(body);
   if (!edmLink) {
@@ -324,9 +328,15 @@ function isleMail(msg, shFiy, shLog) {
   // ★ DÜZELTME: htmlLink (geçici/kısa ömürlü) yerine edmLink (kalıcı) kaydediliyor.
   var urunler = faturaParseEt(faturaHTML, fatNo, gond, tarih, driveLink, edmLink);
   if (!urunler || urunler.length === 0) {
-    try { urunler = faturaBaslikTabanliParse_(faturaHTML, fatNo, gond, tarih, driveLink, edmLink); }
+    var urunYok = false;
+    try { urunler = faturaBaslikTabanliParse_(faturaHTML, fatNo, gond, tarih, driveLink, edmLink); urunYok = !!urunler.urunYok; }
     catch (fe) { Logger.log("Genel ayrıştırıcı hatası: " + fe.message); urunler = []; }
     if (urunler.length > 0) Logger.log("Genel (başlık tabanlı) ayrıştırıcı kullanıldı: " + fatNo);
+  }
+  if ((!urunler || urunler.length === 0) && urunYok) {
+    // Stok malı içermeyen fatura (elektrik/telefon/internet/banka vb.): hata değil, tekrar denenmez.
+    logYaz(shLog, urunYokKey, gond, tarih, "URUN_TABLOSU_YOK", "Ürün tablosu yok (gider faturası olabilir)");
+    return { markRead: true, urunYok: true };
   }
   if (!urunler || urunler.length === 0) {
     // ★ GEÇİCİ TEŞHİS: PARSE_BASARISIZ nedenini anlamak için ham HTML hakkında
@@ -874,7 +884,7 @@ function faturaBaslikTabanliParse_(html, fatNo, gond, tarih, driveLink, edmLink)
   function nrm(c) { return String(c).replace(/İ/g, "i").replace(/[ıI]/g, "i").toLowerCase(); }
   function yuvarla(x) { return Math.round(x * 10000) / 10000; }
 
-  var baslik = null, kol = null, urunler = [], now = new Date();
+  var baslik = null, kol = null, urunler = [], now = new Date(), doluSatir = 0;
   var trPat = /<tr[^>]*>([\s\S]*?)<\/tr>/gi, trM;
   while ((trM = trPat.exec(temiz)) !== null) {
     var h = [], tdM, tdPat = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
@@ -908,6 +918,7 @@ function faturaBaslikTabanliParse_(html, fatNo, gond, tarih, driveLink, edmLink)
     }
 
     if (h.length !== baslik.length) continue;
+    if (h.join("").trim() !== "") doluSatir++;
     var miktar = sayi(h[kol.miktar]), birim = sayi(h[kol.fiyat]);
     var tutar = kol.tutar >= 0 ? sayi(h[kol.tutar]) : 0;
     if (!(miktar > 0) || !(birim > 0 || tutar > 0)) continue;
@@ -932,6 +943,7 @@ function faturaBaslikTabanliParse_(html, fatNo, gond, tarih, driveLink, edmLink)
       driveLink: driveLink || "", edmLink: edmLink || "", islemZamani: now
     });
   }
+  urunler.urunYok = (!baslik || doluSatir === 0); // ürün tablosu hiç yok / boş (elektrik, telefon, banka vb.)
   return urunler;
 }
 
