@@ -261,6 +261,7 @@ function efaturaTara_() {
   });
   var ozet = Object.keys(sayac).map(function(k) { return k + ": " + sayac[k]; }).join(", ");
   if (ozet) ozet += " | Örnek: " + ornek.join("; ");
+  if (ctx.ornekler) ozet += " || ŞABLON: " + Object.keys(ctx.ornekler).map(function(k) { return k + "→ " + ctx.ornekler[k]; }).join(" ## ");
   return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan, hataOzeti: ozet };
 }
 
@@ -330,6 +331,11 @@ function isleMail(msg, shFiy, shLog) {
       " null=" + (/\x00/.test(faturaHTML)) +
       " tr=" + ((faturaHTML.match(/<tr[\s>]/gi) || []).length) +
       " ilk60=" + faturaHTML.substring(0, 60).replace(/[\r\n\t]/g, " ");
+    if (_scanCtx) {
+      var onek = (fatNo || "?").substring(0, 3);
+      _scanCtx.ornekler = _scanCtx.ornekler || {};
+      if (!_scanCtx.ornekler[onek]) _scanCtx.ornekler[onek] = faturaSatirOrnekleri_(faturaHTML);
+    }
     logYaz(shLog, fatNo, gond, tarih, "PARSE_BASARISIZ", "Ürün parse edilemedi | " + teshis);
     return { markRead: false };
   }
@@ -348,6 +354,23 @@ function isleMail(msg, shFiy, shLog) {
   logYaz(shLog, fatNo, gond, tarih, "BASARILI", urunler.length + " ürün");
   Logger.log("✅ " + fatNo + " → " + urunler.length + " ürün");
   return { markRead: true, yeni: true };
+}
+
+// Teşhis: <tr> satırlarından en çok hücreli 2 tanesinin hücre metinleri (şablon tanımak için)
+function faturaSatirOrnekleri_(html) {
+  try {
+    var temiz = String(html).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
+    var satirlar = [], trM, trPat = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
+    while ((trM = trPat.exec(temiz)) !== null) {
+      var h = [], tdM, tdPat = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      while ((tdM = tdPat.exec(trM[1])) !== null) {
+        h.push(tdM[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().substring(0, 22));
+      }
+      if (h.length >= 6) satirlar.push(h);
+    }
+    satirlar.sort(function(a, b) { return b.length - a.length; });
+    return satirlar.slice(0, 3).map(function(h) { return "[" + h.length + "] " + h.join(" | "); }).join(" // ") || "(6+ hücreli satır yok)";
+  } catch (e) { return "örnek alınamadı: " + e.message; }
 }
 
 function faturaHtmliPDFKaydet(html, fatNo, tarih) {
