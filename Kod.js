@@ -337,7 +337,7 @@ function isleMail(msg, shFiy, shLog) {
       " tr=" + ((faturaHTML.match(/<tr[\s>]/gi) || []).length) +
       " ilk60=" + faturaHTML.substring(0, 60).replace(/[\r\n\t]/g, " ");
     if (_scanCtx) {
-      var onek = (fatNo || "?").substring(0, 3);
+      var onek = fatNo ? fatNo.substring(0, 3) : ("KONU:" + String(konu).substring(0, 40));
       _scanCtx.ornekler = _scanCtx.ornekler || {};
       if (!_scanCtx.ornekler[onek]) _scanCtx.ornekler[onek] = faturaSatirOrnekleri_(faturaHTML);
     }
@@ -369,12 +369,12 @@ function faturaSatirOrnekleri_(html) {
     while ((trM = trPat.exec(temiz)) !== null) {
       var h = [], tdM, tdPat = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
       while ((tdM = tdPat.exec(trM[1])) !== null) {
-        h.push(tdM[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().substring(0, 22));
+        h.push(tdM[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().substring(0, 28));
       }
-      if (h.length >= 6) satirlar.push(h);
+      if (h.length >= 3) satirlar.push(h);
     }
     satirlar.sort(function(a, b) { return b.length - a.length; });
-    return satirlar.slice(0, 3).map(function(h) { return "[" + h.length + "] " + h.join(" | "); }).join(" // ") || "(6+ hücreli satır yok)";
+    return satirlar.slice(0, 5).map(function(h) { return "[" + h.length + "] " + h.join(" | "); }).join(" // ") || "(3+ hücreli satır yok; html uzunluk=" + String(html).length + ")";
   } catch (e) { return "örnek alınamadı: " + e.message; }
 }
 
