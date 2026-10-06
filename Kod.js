@@ -64,7 +64,120 @@ const STOK_SHEETS = {
 //  E-FATURA
 // ═══════════════════════════════════════════════════════════════════
 
+// ───────────────────────────────────────────────────────────────────
+//  TARAMA PROGRAMI (ERP'den ayarlanır)
+//  • Her 15 dk'lık tetikleyici yalnızca "planlı saat geldi ve o saatten sonra tarama
+//    yapılmadıysa" gerçekten tarar → varsayılan 09:00 ve 17:00. Kaçan saat bir sonraki
+//    tetikte telafi edilir. ERP'deki "Tarama Yap" düğmesi anında tarar ve o ana kadarki
+//    planlı saatleri karşılar.
+//  • Tarama okundu/okunmadı BAKMAZ: son TARAMA_GUN günün tüm e-fatura mailleri taranır,
+//    FATURAFIYAT'ta zaten bulunan fatura numaraları atlanır.
+// ───────────────────────────────────────────────────────────────────
+var TARAMA_VARSAYILAN_SAATLER = "09:00,17:00";
+var TARAMA_GUN = 45;
+var _scanCtx = null;
+
+function taramaSaatleriGetir_() {
+  var ham = PropertiesService.getScriptProperties().getProperty("TARAMA_SAATLER") || TARAMA_VARSAYILAN_SAATLER;
+  return taramaSaatleriTemizle_(ham);
+}
+
+// "9:00, 17:30" → ["09:00","17:30"] (geçersizler atılır, sıralı, tekrarsız)
+function taramaSaatleriTemizle_(ham) {
+  var gor = {}, liste = [];
+  String(ham || "").split(/[,;\s]+/).forEach(function(p) {
+    var m = p.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return;
+    var h = parseInt(m[1], 10), dk = parseInt(m[2], 10);
+    if (h > 23 || dk > 59) return;
+    var t = (h < 10 ? "0" : "") + h + ":" + (dk < 10 ? "0" : "") + dk;
+    if (!gor[t]) { gor[t] = true; liste.push(t); }
+  });
+  liste.sort();
+  return liste;
+}
+
+function taramaSonZaman_() {
+  var v = PropertiesService.getScriptProperties().getProperty("TARAMA_SON");
+  return v ? new Date(v) : null;
+}
+
+// Bugün, şu ana kadar gelmiş planlı saatlerden biri (son taramadan sonra) var mı?
+function taramaZamaniGeldiMi_(simdi, saatler, son) {
+  var tz = "Europe/Istanbul";
+  var bugun = Utilities.formatDate(simdi, tz, "yyyy-MM-dd");
+  if (!son) return true; // hiç tarama yapılmamış
+  var gecerli = false;
+  saatler.forEach(function(t) {
+    var slot = new Date(bugun + "T" + t + ":00+03:00");
+    if (slot.getTime() <= simdi.getTime() && slot.getTime() > son.getTime()) gecerli = true;
+  });
+  return gecerli;
+}
+
+function taramaSonrakiPlan_(simdi, saatler) {
+  var tz = "Europe/Istanbul";
+  for (var g = 0; g < 3; g++) {
+    var gun = Utilities.formatDate(new Date(simdi.getTime() + g * 86400000), tz, "yyyy-MM-dd");
+    for (var i = 0; i < saatler.length; i++) {
+      var slot = new Date(gun + "T" + saatler[i] + ":00+03:00");
+      if (slot.getTime() > simdi.getTime()) return gun + " " + saatler[i];
+    }
+  }
+  return "";
+}
+
+function taramaDurumGetir_() {
+  var saatler = taramaSaatleriGetir_();
+  var son = taramaSonZaman_();
+  var p = PropertiesService.getScriptProperties();
+  return {
+    ok: true,
+    saatler: saatler.join(", "),
+    sonTarama: son ? Utilities.formatDate(son, "Europe/Istanbul", "dd.MM.yyyy HH:mm") : "",
+    sonSonuc: p.getProperty("TARAMA_SON_SONUC") || "",
+    sonraki: taramaSonrakiPlan_(new Date(), saatler)
+  };
+}
+
+function taramaAyarKaydet_(body) {
+  var liste = taramaSaatleriTemizle_(body && body.saatler);
+  if (liste.length === 0) return { ok: false, hata: "En az bir geçerli saat girin (örn. 09:00, 17:00)" };
+  PropertiesService.getScriptProperties().setProperty("TARAMA_SAATLER", liste.join(","));
+  return taramaDurumGetir_();
+}
+
+// Zamanlanmış tetikleyici girişi (15 dk'da bir çağrılır, yalnızca planlı saatte tarar)
 function efaturaOku() {
+  var simdi = new Date();
+  if (!taramaZamaniGeldiMi_(simdi, taramaSaatleriGetir_(), taramaSonZaman_())) {
+    Logger.log("Planlı tarama saati değil, atlandı.");
+    return;
+  }
+  efaturaTaraVeKaydet_();
+}
+
+// Tarar; tamamlanırsa "son tarama" zamanını günceller. Süre yetmezse devam:true döner
+// ve zaman damgası güncellenmez (sonraki tetik/çağrı kaldığı yerden sürdürür).
+function efaturaTaraVeKaydet_() {
+  var kilit = LockService.getScriptLock();
+  if (!kilit.tryLock(20000)) return { ok: false, hata: "Başka bir tarama sürüyor, biraz sonra tekrar deneyin" };
+  try {
+    var bas = new Date();
+    var r = efaturaTara_();
+    var p = PropertiesService.getScriptProperties();
+    if (r.ok && !r.devam) p.setProperty("TARAMA_SON", bas.toISOString());
+    if (r.ok) {
+      p.setProperty("TARAMA_SON_SONUC",
+        (r.devam ? "Yarım kaldı (devam edilecek) · " : "") + r.yeni + " yeni fatura işlendi, " + r.hatali + " işlenemedi, " + r.atlanan + " zaten kayıtlı");
+    }
+    return r;
+  } finally {
+    kilit.releaseLock();
+  }
+}
+
+function efaturaTara_() {
   var baslangic = Date.now();
   var SURE_SINIRI_MS = 4.5 * 60 * 1000; // 6dk'lık sert Apps Script sınırına çarpmadan nazikçe dur
 
@@ -79,36 +192,68 @@ function efaturaOku() {
   var shLog = getOrCreateSheet(ss, SHEET_LOG,
     ["FATURA_NO","GONDEREN","TARIH","DURUM","DETAY","ISLEM_ZAMANI"]);
 
-  var threads = GmailApp.search(MAIL_QUERY_EF, 0, 200);
-  if (threads.length === 0) { Logger.log("Yeni e-fatura yok."); return; }
-  Logger.log(threads.length + " e-fatura maili bulundu.");
-
-  var durduruldu = false;
-  threads.forEach(function(thread) {
-    if (durduruldu) return;
-    thread.getMessages().forEach(function(msg) {
-      if (durduruldu) return;
-      if (!msg.isUnread()) return;
-      if (Date.now() - baslangic > SURE_SINIRI_MS) {
-        durduruldu = true;
-        Logger.log("⏱ Süre sınırına yaklaşıldı, kalan mailler bir sonraki çalıştırmaya bırakıldı.");
-        return;
-      }
-      try {
-        var sonuc = isleMail(msg, shFiy, shLog);
-        // ★ DÜZELTME: önceden isleMail içeride LINK_YOK/SAYFA_HATASI/PARSE_BASARISIZ
-        // gibi durumlarda hata fırlatmadan sessizce dönüyordu; bu satır her zaman
-        // çalıştığı için başarısız işlenen faturalar da "okundu" sayılıp bir daha
-        // hiç taranmıyordu. Artık sadece gerçekten sonuçlanan (başarılı, zaten
-        // işlenmiş, filtre dışı) mailler okundu işaretleniyor — teknik hatalarda
-        // mail okunmadı kalıp bir sonraki çalıştırmada otomatik tekrar denenecek.
-        if (sonuc && sonuc.markRead) msg.markRead();
-      } catch(e) {
-        Logger.log("HATA: " + e.message);
-        logYaz(shLog, "?", msg.getFrom(), msg.getDate(), "HATA", e.message);
-      }
+  // Bağlam: FATURAFIYAT'taki fatura no'lar (tek okuma) + son log satırları (spam önleme)
+  var ctx = { basari: {}, logAnahtar: {}, yeni: 0, hatali: 0, atlanan: 0 };
+  var fData = shFiy.getDataRange().getValues();
+  if (fData.length > 1) {
+    var fi = fData[0].indexOf("FATURA_NO");
+    if (fi >= 0) for (var i = 1; i < fData.length; i++) ctx.basari[String(fData[i][fi])] = true;
+  }
+  var lSon = shLog.getLastRow();
+  if (lSon > 1) {
+    var ilk = Math.max(2, lSon - 2999);
+    shLog.getRange(ilk, 1, lSon - ilk + 1, 4).getValues().forEach(function(r) {
+      ctx.logAnahtar[String(r[0]) + "|" + String(r[3])] = true;
     });
-  });
+  }
+  _scanCtx = ctx;
+
+  var devam = false;
+  try {
+    var baslangicGunu = Utilities.formatDate(new Date(Date.now() - TARAMA_GUN * 86400000), "Europe/Istanbul", "yyyy/MM/dd");
+    var sorgu = 'subject:"e-Faturanız var" after:' + baslangicGunu;
+    var threads = [];
+    for (var ofs = 0; ofs < 600; ofs += 100) {
+      var parca = GmailApp.search(sorgu, ofs, 100);
+      threads = threads.concat(parca);
+      if (parca.length < 100) break;
+    }
+    Logger.log(threads.length + " e-fatura konuşması bulundu.");
+
+    for (var t = 0; t < threads.length && !devam; t++) {
+      var msgs = threads[t].getMessages();
+      for (var k = 0; k < msgs.length; k++) {
+        var msg = msgs[k];
+        var konu = msg.getSubject();
+        if (konu.indexOf("e-Faturanız var") < 0) continue;
+        var mm = konu.match(/- ([A-Z]{2,6}\d{8,16}) -/);
+        var no = mm ? mm[1] : "";
+        if (no && ctx.basari[no]) { ctx.atlanan++; continue; }
+        if (Date.now() - baslangic > SURE_SINIRI_MS) {
+          devam = true;
+          Logger.log("⏱ Süre sınırı, kalan mailler sonraki çağrıya bırakıldı.");
+          break;
+        }
+        try {
+          var sonuc = isleMail(msg, shFiy, shLog);
+          if (sonuc && sonuc.markRead) {
+            if (msg.isUnread()) msg.markRead();
+            if (sonuc.yeni) { ctx.yeni++; if (no) ctx.basari[no] = true; }
+            else ctx.atlanan++;
+          } else {
+            ctx.hatali++;
+          }
+        } catch(e) {
+          ctx.hatali++;
+          Logger.log("HATA: " + e.message);
+          logYaz(shLog, no || "?", msg.getFrom(), msg.getDate(), "HATA", e.message);
+        }
+      }
+    }
+  } finally {
+    _scanCtx = null;
+  }
+  return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan };
 }
 
 function isleMail(msg, shFiy, shLog) {
@@ -130,7 +275,7 @@ function isleMail(msg, shFiy, shLog) {
     if (!gecerli) { Logger.log("Filtre dışı: " + fatNo); return { markRead: true }; }
   }
 
-  if (fatNo && faturaIslendiMi(shLog, fatNo)) {
+  if (fatNo && (_scanCtx ? _scanCtx.basari[fatNo] : faturaIslendiMi(shLog, fatNo))) {
     Logger.log("Zaten işlendi: " + fatNo);
     return { markRead: true };
   }
@@ -194,7 +339,7 @@ function isleMail(msg, shFiy, shLog) {
   urunler.forEach(function(u) { fiyatYaz(shFiy, u); });
   logYaz(shLog, fatNo, gond, tarih, "BASARILI", urunler.length + " ürün");
   Logger.log("✅ " + fatNo + " → " + urunler.length + " ürün");
-  return { markRead: true };
+  return { markRead: true, yeni: true };
 }
 
 function faturaHtmliPDFKaydet(html, fatNo, tarih) {
@@ -1059,7 +1204,7 @@ function efatura2026Getir() {
         var m = konu.match(/- ([A-Z]{2,6}\d{8,16}) -/);
         if (m) fatNo = m[1];
 
-        if (fatNo && faturaIslendiMi(shLog, fatNo)) {
+        if (fatNo && (_scanCtx ? _scanCtx.basari[fatNo] : faturaIslendiMi(shLog, fatNo))) {
           Logger.log("Zaten işlenmiş, atlanıyor: " + fatNo);
           atlanan++;
           return;
@@ -1137,8 +1282,10 @@ function manuelEfatura2026() {
 
 function manuelEfatura() {
   try {
-    efaturaOku();
-    return { ok: true, mesaj: "E-fatura çekimi tamamlandı" };
+    var r = efaturaTaraVeKaydet_();
+    if (!r.ok) return r;
+    r.mesaj = "E-fatura taraması " + (r.devam ? "kısmen" : "") + " tamamlandı";
+    return r;
   } catch(e) {
     return { ok: false, hata: e.message };
   }
@@ -1258,6 +1405,12 @@ function faturaIslendiMi(shLog, fatNo) {
 }
 
 function logYaz(sh, fatNo, gond, tarih, durum, detay) {
+  // Tarama sırasında aynı fatura+durum zaten loglandıysa tekrar yazma (log şişmesini önler)
+  if (_scanCtx && durum !== "BASARILI") {
+    var an = String(fatNo) + "|" + String(durum);
+    if (_scanCtx.logAnahtar[an]) return;
+    _scanCtx.logAnahtar[an] = true;
+  }
   sh.appendRow([
     fatNo, gond,
     Utilities.formatDate(new Date(tarih), "Europe/Istanbul", "dd/MM/yyyy HH:mm"),
@@ -1590,6 +1743,9 @@ function handleRequest(e) {
       case "saveAyar":       result = saveAyar(body);         break;
       case "saveStoklar":    result = saveStoklar(body);      break;
       case "efaturaOku":     result = manuelEfatura();      break;
+      case "taramaDurum":    result = taramaDurumGetir_();   break;
+      case "taramaYap":      result = manuelEfatura();       break;
+      case "taramaAyarKaydet": result = taramaAyarKaydet_(body); break;
       case "efatura2026":    result = manuelEfatura2026();    break;
       case "sifirlaVeYenidenOku": result = tumFaturalariSifirlaVeYenidenOku(); break;
       case "getDashboardData": result = getCombinedDashboardData(); break;
@@ -1877,7 +2033,7 @@ function setupTriggers() {
 
 function manuelTest() {
   Logger.log("=== E-FATURA MANUEL TEST ===");
-  efaturaOku();
+  efaturaTaraVeKaydet_();
   Logger.log("=== BİTTİ ===");
 }
 
