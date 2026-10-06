@@ -324,6 +324,11 @@ function isleMail(msg, shFiy, shLog) {
   // ★ DÜZELTME: htmlLink (geçici/kısa ömürlü) yerine edmLink (kalıcı) kaydediliyor.
   var urunler = faturaParseEt(faturaHTML, fatNo, gond, tarih, driveLink, edmLink);
   if (!urunler || urunler.length === 0) {
+    try { urunler = faturaBaslikTabanliParse_(faturaHTML, fatNo, gond, tarih, driveLink, edmLink); }
+    catch (fe) { Logger.log("Genel ayrıştırıcı hatası: " + fe.message); urunler = []; }
+    if (urunler.length > 0) Logger.log("Genel (başlık tabanlı) ayrıştırıcı kullanıldı: " + fatNo);
+  }
+  if (!urunler || urunler.length === 0) {
     // ★ GEÇİCİ TEŞHİS: PARSE_BASARISIZ nedenini anlamak için ham HTML hakkında
     // kısa bir özet DETAY'a ekleniyor (uzunluk, null byte var mı, <tr> sayısı,
     // ilk 60 karakter). Kök neden bulunduktan sonra bu satır kaldırılabilir.
@@ -850,6 +855,84 @@ function tarihCikarHTMLden(html, yedekTarih) {
 
   var d = (yedekTarih instanceof Date) ? yedekTarih : new Date(yedekTarih);
   return Utilities.formatDate(d, "Europe/Istanbul", "dd/MM/yyyy");
+}
+
+// ★ YENİ: Başlık satırına göre sütun eşleyen GENEL ayrıştırıcı. Sabit şablonlarla (faturaParseEt)
+// okunamayan faturalar için son çare: tablodaki başlık hücrelerinden (Miktar, Birim Fiyat, KDV…)
+// sütunları bulur. Başlıkla aynı hücre sayısına sahip satırları ürün kabul eder.
+function faturaBaslikTabanliParse_(html, fatNo, gond, tarih, driveLink, edmLink) {
+  var tedarikci = String(gond).replace(/"([^"]+)"[\s\S]*/, "$1").replace(/<[^>]+>/g, "").trim();
+  if (fatNo && fatNo.toUpperCase().indexOf("CNY") === 0) tedarikci = "CANYAP";
+  var fatTarih = tarihCikarHTMLden(html, tarih);
+  var temiz = String(html).replace(/<script[\s\S]*?<\/script>/gi, "").replace(/<style[\s\S]*?<\/style>/gi, "");
+
+  function sayi(str) {
+    var m = String(str || "").match(/\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?/);
+    if (!m) return 0;
+    return parseFloat(m[0].replace(/\.(?=\d{3}(?:,|$))/g, "").replace(",", ".")) || 0;
+  }
+  function nrm(c) { return String(c).replace(/İ/g, "i").replace(/[ıI]/g, "i").toLowerCase(); }
+  function yuvarla(x) { return Math.round(x * 10000) / 10000; }
+
+  var baslik = null, kol = null, urunler = [], now = new Date();
+  var trPat = /<tr[^>]*>([\s\S]*?)<\/tr>/gi, trM;
+  while ((trM = trPat.exec(temiz)) !== null) {
+    var h = [], tdM, tdPat = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    while ((tdM = tdPat.exec(trM[1])) !== null) {
+      h.push(tdM[1].replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim());
+    }
+    if (h.length < 5) continue;
+
+    if (!baslik) {
+      var mi = -1, fi = -1, ai = -1;
+      h.forEach(function(c0, i) {
+        var c = nrm(c0);
+        if (/^miktar/.test(c) && mi < 0) mi = i;
+        if (/^(birim\s*fiyat|fiyat)/.test(c) && fi < 0) fi = i;
+        if (/(mal\s*\/?\s*hizmet(?!.*(kod|tutar))|hizmet\s*\/\s*ürün|açikla|cinsi|malzeme.*tanim)/.test(c) && ai < 0) ai = i;
+      });
+      if (mi >= 0 && fi >= 0 && ai >= 0) {
+        baslik = h;
+        kol = { miktar: mi, fiyat: fi, ad: ai, kod: -1, isk: -1, kdv: -1, kdvT: -1, tutar: -1, birlesik: false };
+        h.forEach(function(c0, i) {
+          var c = nrm(c0);
+          if (/kod/.test(c) && i !== ai && kol.kod < 0 && !/arac/.test(c)) kol.kod = i;
+          if (/iskonto\s*oran|^isk/.test(c) && kol.isk < 0) kol.isk = i;
+          if (/^kdv\s*(oran|%)|^kdv$/.test(c) && kol.kdv < 0) kol.kdv = i;
+          if (/kdv\s*tutar/.test(c) && kol.kdvT < 0) kol.kdvT = i;
+          if (/(mal\s*hizmet\s*tutar|^tutar|^toplam)/.test(c) && kol.tutar < 0) kol.tutar = i;
+        });
+        if (/kod/.test(nrm(h[ai]))) kol.birlesik = true; // "MALZEME KODU VE TANIMI" gibi tek hücre
+      }
+      continue;
+    }
+
+    if (h.length !== baslik.length) continue;
+    var miktar = sayi(h[kol.miktar]), birim = sayi(h[kol.fiyat]);
+    var tutar = kol.tutar >= 0 ? sayi(h[kol.tutar]) : 0;
+    if (!(miktar > 0) || !(birim > 0 || tutar > 0)) continue;
+    var ad = h[kol.ad], kod = kol.kod >= 0 ? h[kol.kod] : "";
+    if (kol.birlesik) {
+      var bm = ad.match(/^([A-Z0-9.\-]{4,})\s*[-–]\s*(.+)$/i);
+      if (bm) { kod = bm[1]; ad = bm[2]; }
+    }
+    var isk = kol.isk >= 0 ? sayi(h[kol.isk]) : 0;
+    var kdv = 0;
+    if (kol.kdv >= 0) kdv = sayi(h[kol.kdv]);
+    else if (kol.kdvT >= 0 && tutar > 0) {
+      kdv = sayi(h[kol.kdvT]) / tutar * 100;
+      var yakin = Math.round(kdv);
+      kdv = Math.abs(kdv - yakin) < 0.6 ? yakin : Math.round(kdv * 100) / 100;
+    }
+    var net = tutar > 0 ? yuvarla(tutar / miktar) : yuvarla(birim * (1 - isk / 100));
+    urunler.push({
+      stokKodu: kod, stokAdi: ad, miktar: miktar, birimFiyat: birim, iskonto: isk,
+      netFiyat: net, nakliyePayi: 0, maliyetFiyat: net, kdvOrani: kdv,
+      faturaNo: fatNo, fatTarih: fatTarih, tedarikci: tedarikci,
+      driveLink: driveLink || "", edmLink: edmLink || "", islemZamani: now
+    });
+  }
+  return urunler;
 }
 
 function faturaParseEt(html, fatNo, gond, tarih, driveLink, edmLink) {
