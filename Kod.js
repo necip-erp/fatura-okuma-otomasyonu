@@ -169,7 +169,7 @@ function efaturaTaraVeKaydet_() {
     if (r.ok && !r.devam) p.setProperty("TARAMA_SON", bas.toISOString());
     if (r.ok) {
       p.setProperty("TARAMA_SON_SONUC",
-        (r.devam ? "Yarım kaldı (devam edilecek) · " : "") + r.yeni + " yeni fatura işlendi, " + r.hatali + " işlenemedi, " + r.atlanan + " zaten kayıtlı");
+        (r.devam ? "Yarım kaldı (devam edilecek) · " : "") + r.yeni + " yeni fatura işlendi, " + r.hatali + " işlenemedi, " + r.atlanan + " zaten kayıtlı" + (r.hataOzeti ? " | " + r.hataOzeti : ""));
     }
     return r;
   } finally {
@@ -253,7 +253,15 @@ function efaturaTara_() {
   } finally {
     _scanCtx = null;
   }
-  return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan };
+  // Hata özeti: durum bazında sayı + ilk örnekler (ERP'de "neden işlenemedi" görünsün)
+  var sayac = {}, ornek = [];
+  (ctx.hatalar || []).forEach(function(h) {
+    sayac[h.durum] = (sayac[h.durum] || 0) + 1;
+    if (ornek.length < 8) ornek.push(h.no + " (" + h.tarih + " " + h.gonderen + ") " + h.durum);
+  });
+  var ozet = Object.keys(sayac).map(function(k) { return k + ": " + sayac[k]; }).join(", ");
+  if (ozet) ozet += " | Örnek: " + ornek.join("; ");
+  return { ok: true, devam: devam, yeni: ctx.yeni, hatali: ctx.hatali, atlanan: ctx.atlanan, hataOzeti: ozet };
 }
 
 function isleMail(msg, shFiy, shLog) {
@@ -1407,6 +1415,10 @@ function faturaIslendiMi(shLog, fatNo) {
 function logYaz(sh, fatNo, gond, tarih, durum, detay) {
   // Tarama sırasında aynı fatura+durum zaten loglandıysa tekrar yazma (log şişmesini önler)
   if (_scanCtx && durum !== "BASARILI") {
+    (_scanCtx.hatalar = _scanCtx.hatalar || []).push({
+      no: String(fatNo), durum: String(durum), tarih: Utilities.formatDate(new Date(tarih), "Europe/Istanbul", "dd.MM"),
+      gonderen: String(gond).replace(/<.*>/, "").trim().substring(0, 18)
+    });
     var an = String(fatNo) + "|" + String(durum);
     if (_scanCtx.logAnahtar[an]) return;
     _scanCtx.logAnahtar[an] = true;
