@@ -1906,6 +1906,60 @@ function logKontrol() {
   if (data.length > 1) Logger.log("Son kayıt: " + JSON.stringify(data[data.length-1]));
 }
 
+// ★ TEŞHİS (salt okunur — mail okundu işaretlemez, tabloya yazmaz): "e-faturalar Bekleyen Faturalar'a düşmüyor"
+// sorununun nedenini bulmak için. Apps Script'te çalıştırıp "Yürütme günlüğü"nü oku.
+function efaturaTeshis() {
+  function tarihOku(v) {
+    if (v instanceof Date) return v;
+    var m = String(v || "").match(/(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2}))?/);
+    return m ? new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0)) : null;
+  }
+  function goster(d) { return d ? Utilities.formatDate(d, "Europe/Istanbul", "dd/MM/yyyy HH:mm") : "-"; }
+
+  // 1) Gmail: son 20 günün "e-Faturanız var" mailleri (okunmuş / okunmamış)
+  var threads = GmailApp.search('subject:"e-Faturanız var" newer_than:20d', 0, 200);
+  var okunmamis = 0, okunmus = 0, liste = [];
+  threads.forEach(function(t) {
+    t.getMessages().forEach(function(m) {
+      if (m.isUnread()) okunmamis++; else okunmus++;
+      liste.push({ d: m.getDate(), u: m.isUnread(), k: m.getSubject() });
+    });
+  });
+  liste.sort(function(a, b) { return b.d - a.d; });
+  Logger.log("GMAIL (son 20 gün): toplam " + liste.length + " | okunmamış=" + okunmamis + " | okunmuş=" + okunmus);
+  liste.slice(0, 12).forEach(function(x) {
+    Logger.log("  " + goster(x.d) + (x.u ? "  [OKUNMAMIŞ] " : "  [okunmuş]   ") + x.k.substring(0, 90));
+  });
+
+  // 2) FATURAFIYAT: en yeni işlem zamanı + son faturalar
+  var ss = SpreadsheetApp.openById(SHEET_ID);
+  var shF = ss.getSheetByName(SHEET_FIYAT);
+  var fd = shF.getDataRange().getValues();
+  var h = fd[0], iZ = h.indexOf("ISLEM_ZAMANI"), iN = h.indexOf("FATURA_NO"), iT = h.indexOf("FATURA_TARIHI");
+  var enYeni = null, enYeniNo = "", enYeniTar = "";
+  for (var i = 1; i < fd.length; i++) {
+    var d = tarihOku(fd[i][iZ]);
+    if (d && (!enYeni || d > enYeni)) { enYeni = d; enYeniNo = fd[i][iN]; enYeniTar = fd[i][iT]; }
+  }
+  Logger.log("FATURAFIYAT: " + (fd.length - 1) + " satır | en yeni işlem: " + goster(enYeni) + " | fatura " + enYeniNo + " (fatura tarihi " + enYeniTar + ")");
+
+  // 3) FATURA_LOG: son 600 satırın durum dağılımı ve en son BASARILI kayıt
+  var shL = ss.getSheetByName(SHEET_LOG);
+  var son = shL.getLastRow();
+  var bas = Math.max(2, son - 599);
+  var ld = shL.getRange(bas, 1, son - bas + 1, 6).getValues();
+  var sayim = {}, tekil = {}, sonBasarili = null;
+  ld.forEach(function(r) {
+    sayim[r[3]] = (sayim[r[3]] || 0) + 1;
+    tekil[String(r[0]) + "|" + r[3]] = true;
+    if (r[3] === "BASARILI") sonBasarili = r;
+  });
+  Logger.log("FATURA_LOG: toplam " + (son - 1) + " satır | son 600 satır durum dağılımı: " + JSON.stringify(sayim));
+  Logger.log("  son 600 satırdaki benzersiz (fatura no + durum) sayısı: " + Object.keys(tekil).length + "  (600'e göre ne kadar düşükse aynı hata o kadar tekrar ediyor demek)");
+  Logger.log("  son BASARILI kayıt: " + (sonBasarili ? (sonBasarili[0] + " | işlem " + goster(tarihOku(sonBasarili[5]))) : "son 600 satırda yok"));
+  Logger.log("Tetikleyiciler: " + ScriptApp.getProjectTriggers().map(function(t) { return t.getHandlerFunction(); }).join(", "));
+}
+
 function pdfLinkTest() {
   const ss = SpreadsheetApp.openById(SHEET_ID);
   const sh = ss.getSheetByName(SHEET_FIYAT);
