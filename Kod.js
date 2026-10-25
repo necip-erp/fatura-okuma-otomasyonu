@@ -670,6 +670,11 @@ function nakliyeYenidenDagit(faturaNo, uygula, hedefToplam) {
   }
 
   var uygun = satirlar.filter(function(x) { return x.mik > 0 && isM2Urunu(x.kod, x.ad.toUpperCase()); });
+  if (!uygun.length && hedefToplam !== undefined && hedefToplam !== null) {
+    // nakliyeDagit() ile aynı güvenlik yedeği: m² kuralına uyan kalem yoksa miktar bazlı TÜM kalemlere dağıt.
+    uygun = satirlar.filter(function(x) { return x.mik > 0; });
+    if (uygun.length) Logger.log("m² kuralına uyan kalem yok — nakliye TÜM kalemlere miktar bazlı dağıtılıyor (yedek kural)");
+  }
   if (!uygun.length) { Logger.log("⚠ m² kuralına uyan kalem yok — işlem yapılmadı."); return { ok: false, hata: "uygun kalem yok" }; }
   var toplamM2 = 0;
   uygun.forEach(function(x) { toplamM2 += x.mik; });
