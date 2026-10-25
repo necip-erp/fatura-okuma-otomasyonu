@@ -506,6 +506,14 @@ function faturaOrijinalHtmlGetir(fatNo) {
   return null;
 }
 
+// ★ (26 Eki 2026, CNY2026000002949) %100 iskontolu palet/nakliye satırı BEDELSİZDİR. Eskiden
+// (u.netFiyat || u.birimFiyat) yazıldığı için net fiyat 0 olunca (iskonto %100) palet satırının
+// iskontosuz liste fiyatına (örn. 450 TL) düşülüp m² kalemlerine nakliye payı olarak dağıtılıyordu.
+function nakliyeBirimTutar_(u) {
+  if ((u.iskonto || 0) >= 99.99) return 0;
+  return u.netFiyat || u.birimFiyat;
+}
+
 function nakliyeDagit(urunler) {
   var nakliyeKalemleri = [];
   var normalUrunler = [];
@@ -526,7 +534,7 @@ function nakliyeDagit(urunler) {
 
   var toplamNakliye = 0;
   nakliyeKalemleri.forEach(function(u) {
-    toplamNakliye += (u.netFiyat || u.birimFiyat) * (u.miktar || 1);
+    toplamNakliye += nakliyeBirimTutar_(u) * (u.miktar || 1);
   });
   Logger.log("Toplam nakliye+palet: " + toplamNakliye + " TL");
 
@@ -630,7 +638,7 @@ function isM2Urunu(stokKodu, adUpper) {
 // NOT: Fatura ERP'de "Bekleyen Alış Faturaları"nda henüz ONAYLANMADIYSA onay ekranı yenilenince doğru payları
 // gösterir; ONAYLANMIŞSA oluşan Alış kaydı ERP'de ayrıca düzeltilmelidir (bu fonksiyon o kaydı değiştirmez).
 // ══════════════════════════════════════════════════════════════════
-function nakliyeYenidenDagit(faturaNo, uygula) {
+function nakliyeYenidenDagit(faturaNo, uygula, hedefToplam) {
   var ss = SpreadsheetApp.openById(SHEET_ID);
   var sh = ss.getSheetByName(SHEET_FIYAT);
   if (!sh || sh.getLastRow() < 2) { Logger.log("FATURAFIYAT sayfası boş/bulunamadı"); return { ok: false, hata: "sayfa yok" }; }
@@ -652,7 +660,11 @@ function nakliyeYenidenDagit(faturaNo, uygula) {
   var toplamNakliye = 0;
   satirlar.forEach(function(x) { toplamNakliye += x.nak * (x.mik > 0 ? x.mik : 0); });
   Logger.log("Fatura " + hedef + ": " + satirlar.length + " kalem, mevcut dağıtılmış toplam nakliye = " + toplamNakliye.toFixed(2) + " TL");
-  if (toplamNakliye < 0.005) {
+  if (hedefToplam !== undefined && hedefToplam !== null) {
+    Logger.log("Sayfadaki toplam nakliye " + toplamNakliye.toFixed(2) + " TL yerine DOĞRU toplam kullanılıyor: " + Number(hedefToplam).toFixed(2) + " TL");
+    toplamNakliye = Number(hedefToplam);
+  }
+  if (toplamNakliye < 0.005 && (hedefToplam === undefined || hedefToplam === null)) {
     Logger.log("⚠ Bu faturada dağıtılmış nakliye payı yok — nakliye tutarı FATURAFIYAT'tan geri hesaplanamıyor (fatura maili yeniden okunmalı).");
     return { ok: false, hata: "nakliye yok" };
   }
@@ -681,6 +693,40 @@ function nakliyeYenidenDagit(faturaNo, uygula) {
   Logger.log((uygula ? "✅ UYGULANDI: " : "ÖNİZLEME (hiçbir şey yazılmadı): ") + degisen + " satır " + (uygula ? "güncellendi" : "güncellenecek"));
   return { ok: true, faturaNo: hedef, toplamNakliye: toplamNakliye, uygunKalem: uygun.length, toplamM2: toplamM2, nakliyeM2: nakliyeM2, degisen: degisen, uygulandi: !!uygula };
 }
+// ══════════════════════════════════════════════════════════════════
+// ★ (26 Eki 2026) %100 İSKONTOLU PALET HATASININ ESKİ FATURALARDA DÜZELTİLMESİ
+// Orijinal fatura HTML'ini (Drive) yeniden okuyup nakliye/palet toplamını DOĞRU hesaplar (%100 iskontolu
+// satır 0 TL) ve FATURAFIYAT'taki NAKLIYE_PAYI/MALIYET_FIYAT'ı buna göre yeniden dağıtır. Yalnızca
+// faturada %100 iskontolu nakliye/palet satırı varsa işlem yapar. uygula=false → sadece Log'a önizleme.
+// NOT: Fatura ERP'de ONAYLANMIŞSA oluşan Alış kaydı ayrıca düzeltilmelidir (bu fonksiyon onu değiştirmez).
+// ══════════════════════════════════════════════════════════════════
+function paletIskontoDogruNakliye_(faturaNo) {
+  var html = faturaOrijinalHtmlGetir(faturaNo);
+  if (!html) return { ok: false, hata: "orijinal html bulunamadı" };
+  var urunler = faturaParseEt(html, faturaNo, "", "", "", "");
+  var toplam = 0, yuzdeYuzVar = false;
+  urunler.forEach(function(u) {
+    var adUpper = (u.stokAdi || "").toUpperCase();
+    var isNakliyeKw  = NAKLIYE_KW.some(function(kw) { return adUpper.indexOf(kw) > -1; });
+    var isNakliyeKod = NAKLIYE_KODLAR.indexOf(u.stokKodu) > -1;
+    if (isNakliyeKw || isNakliyeKod) {
+      if ((u.iskonto || 0) >= 99.99) yuzdeYuzVar = true;
+      toplam += nakliyeBirimTutar_(u) * (u.miktar || 1);
+    }
+  });
+  return { ok: true, toplam: Math.round(toplam * 100) / 100, yuzdeYuzVar: yuzdeYuzVar };
+}
+function paletIskontoDuzelt(faturaNo, uygula) {
+  var r = paletIskontoDogruNakliye_(faturaNo);
+  if (!r.ok) { Logger.log(faturaNo + ": " + r.hata); return r; }
+  if (!r.yuzdeYuzVar) { Logger.log(faturaNo + ": %100 iskontolu nakliye/palet satırı yok — işlem gerekmiyor."); return { ok: true, faturaNo: faturaNo, etkilenmez: true }; }
+  Logger.log(faturaNo + ": %100 iskontolu nakliye/palet satırı var, doğru toplam nakliye = " + r.toplam + " TL");
+  return nakliyeYenidenDagit(faturaNo, uygula, r.toplam);
+}
+var PALET_DUZELT_FATURALAR = ["CNY2026000002949"]; // düzeltilecek fatura numaralarını buraya ekle
+function paletDuzeltOnizleme() { return PALET_DUZELT_FATURALAR.map(function(f) { return paletIskontoDuzelt(f, false); }); }
+function paletDuzeltUygula()   { return PALET_DUZELT_FATURALAR.map(function(f) { return paletIskontoDuzelt(f, true); }); }
+
 // Apps Script editöründe ▶ Çalıştır ile: önce ÖNİZLEME (Log'a önce/sonra yazar), sonra UYGULA.
 function nakliyeDuzeltOnizleme() { return nakliyeYenidenDagit("CNY2026000002602", false); }
 function nakliyeDuzeltUygula()   { return nakliyeYenidenDagit("CNY2026000002602", true); }
